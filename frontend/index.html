@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HomeStack</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="authOverlay" class="auth-overlay">
+    <div class="auth-card panel">
+      <h1>HomeStack</h1>
+      <p class="subtitle">Manage Linux Docker Compose stacks, templates and runtime controls.</p>
+
+      <div id="localAuthBlock">
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-auth-view="login">Login</button>
+          <button class="auth-tab" data-auth-view="register">Create account</button>
+        </div>
+
+        <div id="auth-login" class="auth-view">
+          <label>
+            Username
+            <input id="loginUsername" type="text" autocomplete="username" />
+          </label>
+          <label>
+            Password
+            <input id="loginPassword" type="password" autocomplete="current-password" />
+          </label>
+          <button id="loginBtn" class="primary">Login</button>
+        </div>
+
+        <div id="auth-register" class="auth-view hidden">
+          <label>
+            Username
+            <input id="registerUsername" type="text" autocomplete="username" />
+          </label>
+          <label>
+            Password
+            <input id="registerPassword" type="password" autocomplete="new-password" />
+          </label>
+          <button id="registerBtn" class="primary">Create account</button>
+        </div>
+      </div>
+
+      <div id="ssoAuthBlock" class="hidden">
+        <h2>Authelia SSO enabled</h2>
+        <p class="subtitle">This instance expects authentication from Authelia through a reverse proxy.</p>
+        <div class="button-row">
+          <a id="ssoLoginLink" class="button-link primary" href="/">Open Authelia login</a>
+          <button id="ssoRetryBtn">Retry</button>
+        </div>
+      </div>
+
+      <pre id="authStatus">Create the first account to become admin, or sign in through Authelia if SSO is enabled.</pre>
+    </div>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <h1>HomeStack</h1>
+      <p class="subtitle">Deploy, edit and control Linux ready Docker Compose stacks. Pick install paths and connect bind mounts or named volumes.</p>
+      <div class="user-box">
+        <div><strong id="currentUser">Not signed in</strong></div>
+        <div class="hint" id="currentRole">Guest</div>
+        <div class="hint" id="authModeBadge">Auth mode: local</div>
+      </div>
+      <nav>
+        <button class="nav-btn active" data-view="deploy">Deploy</button>
+        <button class="nav-btn" data-view="stacks">Stacks</button>
+        <button class="nav-btn" data-view="templates">Template builder</button>
+        <button class="nav-btn" data-view="system">System</button>
+      </nav>
+      <button id="logoutBtn">Log out</button>
+    </aside>
+
+    <main class="content">
+      <section class="panel" id="view-deploy">
+        <div class="panel-header">
+          <h2 id="deployTitle">Deploy a stack</h2>
+          <div class="button-row">
+            <button id="newStackBtn">New stack</button>
+            <button id="refreshAll">Refresh</button>
+          </div>
+        </div>
+
+        <label>
+          Template
+          <select id="templateSelect"></select>
+        </label>
+
+        <label>
+          Stack name
+          <input id="stackName" type="text" placeholder="jellyfin-main" />
+        </label>
+
+        <label>
+          Install path
+          <input id="installPath" type="text" placeholder="/opt/homelab/jellyfin-main" />
+        </label>
+
+        <div id="dynamicFields" class="grid"></div>
+
+        <section class="subpanel">
+          <div class="panel-header compact">
+            <h3>Connect existing Docker named volumes</h3>
+            <span class="hint">Optional, pick a named volume for any placeholder key</span>
+          </div>
+          <div id="volumeBindings" class="grid"></div>
+        </section>
+
+        <div class="button-row">
+          <button id="deployBtn" class="primary">Deploy stack</button>
+          <button id="saveEditBtn" class="hidden">Save changes</button>
+        </div>
+        <pre id="statusBox">Ready.</pre>
+      </section>
+
+      <section class="panel hidden" id="view-stacks">
+        <div class="panel-header">
+          <h2>Deployed stacks</h2>
+          <button id="refreshStacksBtn">Refresh stacks</button>
+        </div>
+        <div id="stacksList"></div>
+      </section>
+
+      <section class="panel hidden" id="view-templates">
+        <div class="panel-header">
+          <h2>Template builder</h2>
+        </div>
+        <div class="grid two-col">
+          <label>
+            Template id
+            <input id="builderId" type="text" placeholder="nextcloud-custom" />
+          </label>
+          <label>
+            Template name
+            <input id="builderName" type="text" placeholder="Nextcloud" />
+          </label>
+        </div>
+        <label>
+          Description
+          <input id="builderDescription" type="text" placeholder="Describe what this stack deploys" />
+        </label>
+        <label>
+          Default install subdirectory
+          <input id="builderSubdir" type="text" placeholder="cloud/nextcloud" />
+        </label>
+        <label>
+          Placeholder keys, one per line
+          <textarea id="builderPlaceholders" rows="6" placeholder="APP_CONFIG_PATH&#10;APP_DATA_PATH"></textarea>
+        </label>
+        <label>
+          Compose template text
+          <textarea id="builderCompose" rows="18" spellcheck="false" placeholder="services:
+  app:
+    image: example/app:latest
+    container_name: {{STACK_NAME}}
+    volumes:
+      - {{APP_CONFIG_PATH}}:/config"></textarea>
+        </label>
+        <div class="button-row">
+          <button id="builderGenerateExample">Insert example</button>
+          <button id="builderSave" class="primary">Save template</button>
+        </div>
+        <pre id="builderStatus">Create reusable deployment templates from the UI.</pre>
+      </section>
+
+      <section class="panel hidden" id="view-system">
+        <div class="panel-header">
+          <h2>System status</h2>
+        </div>
+        <div id="systemStatus"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

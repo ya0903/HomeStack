@@ -1,0 +1,7 @@
+{
+  "id": "bazarr",
+  "name": "Bazarr",
+  "description": "Deploy Bazarr on its own with separate config, movies and TV library paths.",
+  "default_install_subdir": "media/bazarr",
+  "required_placeholders": ["BAZARR_CONFIG_PATH", "BAZARR_MOVIES_PATH", "BAZARR_TV_PATH"]
+}

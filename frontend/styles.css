@@ -1,0 +1,219 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0f14;
+  --panel: #111722;
+  --panel-2: #161f2d;
+  --line: #243247;
+  --text: #e7edf5;
+  --muted: #9db0c7;
+  --accent: #5fb3ff;
+  --accent-2: #84ffd6;
+  --danger: #ff7d7d;
+  --ok: #7ef0b1;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, Arial, sans-serif;
+  background: linear-gradient(180deg, #091018, #0d1320 35%, #0a1017);
+  color: var(--text);
+}
+
+button, input, select, textarea { font: inherit; }
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: rgba(10, 14, 20, 0.96);
+  border-right: 1px solid var(--line);
+  padding: 24px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.subtitle, .hint {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.user-box {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+nav { display: grid; gap: 10px; }
+.nav-btn, button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.nav-btn.active, button.primary {
+  background: linear-gradient(135deg, var(--accent), #2e86d7);
+  border-color: transparent;
+  color: #081018;
+  font-weight: 700;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.content {
+  padding: 28px;
+  display: grid;
+  gap: 20px;
+}
+
+.panel, .subpanel {
+  background: rgba(17, 23, 34, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.2);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.panel-header.compact { margin-bottom: 12px; }
+
+label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 0.95rem;
+}
+
+input, select, textarea {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 12px 14px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.two-col {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+pre {
+  margin-top: 18px;
+  background: #090d13;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--panel-2);
+  margin-bottom: 12px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 16px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 12px;
+  margin: 10px 0;
+}
+
+.tag {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.04);
+  margin-right: 6px;
+  margin-bottom: 6px;
+}
+
+.ok { color: var(--ok); }
+.danger { color: var(--danger); }
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 9, 14, 0.88);
+  display: grid;
+  place-items: center;
+  z-index: 20;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(520px, 100%);
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.auth-tab.active {
+  background: linear-gradient(135deg, var(--accent), #2e86d7);
+  border-color: transparent;
+  color: #081018;
+  font-weight: 700;
+}
+
+.hidden { display: none !important; }
+
+@media (max-width: 1080px) {
+  .card-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar {
+    position: relative;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+
+.button-link{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.hidden{display:none!important}

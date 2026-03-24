@@ -1,0 +1,7 @@
+{
+  "id": "qbittorrent",
+  "name": "qBittorrent",
+  "description": "Deploy qBittorrent on its own with separate config and downloads paths.",
+  "default_install_subdir": "media/qbittorrent",
+  "required_placeholders": ["QBITTORRENT_CONFIG_PATH", "QBITTORRENT_DOWNLOADS_PATH"]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "arr-stack",
+  "name": "Arr Stack Combined",
+  "description": "Deploy Sonarr, Radarr, Prowlarr, qBittorrent and Bazarr together with shared downloads and media mounts.",
+  "default_install_subdir": "media/arr-stack",
+  "required_placeholders": ["ARR_CONFIG_ROOT", "ARR_DOWNLOADS_PATH", "ARR_MOVIES_PATH", "ARR_TV_PATH"]
+}

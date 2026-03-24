@@ -1,0 +1,23 @@
+homelab.example.com {
+    encode gzip zstd
+
+    @api path /api/*
+    @auth exempt path /api/auth/config /api/health
+
+    handle @auth {
+        reverse_proxy homestack-backend:8000
+    }
+
+    forward_auth authelia:9091 {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    }
+
+    handle @api {
+        reverse_proxy homestack-backend:8000
+    }
+
+    handle {
+        reverse_proxy homestack-frontend:80
+    }
+}

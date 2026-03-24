@@ -1,0 +1,7 @@
+{
+  "id": "sonarr",
+  "name": "Sonarr",
+  "description": "Deploy Sonarr on its own with separate config, downloads and TV library paths.",
+  "default_install_subdir": "media/sonarr",
+  "required_placeholders": ["SONARR_CONFIG_PATH", "SONARR_DOWNLOADS_PATH", "SONARR_TV_PATH"]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "nextcloud",
+  "name": "Nextcloud",
+  "description": "Deploy Nextcloud with MariaDB and Redis using Linux bind mounts you can place anywhere.",
+  "default_install_subdir": "cloud/nextcloud",
+  "required_placeholders": ["NC_APP_PATH", "NC_DATA_PATH", "NC_DB_PATH", "NC_REDIS_PATH"]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "prowlarr",
+  "name": "Prowlarr",
+  "description": "Deploy Prowlarr on its own with a dedicated config path.",
+  "default_install_subdir": "media/prowlarr",
+  "required_placeholders": ["PROWLARR_CONFIG_PATH"]
+}

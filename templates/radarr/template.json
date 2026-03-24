@@ -1,0 +1,7 @@
+{
+  "id": "radarr",
+  "name": "Radarr",
+  "description": "Deploy Radarr on its own with separate config, downloads and movie library paths.",
+  "default_install_subdir": "media/radarr",
+  "required_placeholders": ["RADARR_CONFIG_PATH", "RADARR_DOWNLOADS_PATH", "RADARR_MOVIES_PATH"]
+}

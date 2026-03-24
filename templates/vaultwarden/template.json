@@ -1,0 +1,7 @@
+{
+  "id": "vaultwarden",
+  "name": "Vaultwarden",
+  "description": "Deploy Vaultwarden with a dedicated persistent data path for lightweight self-hosted password management.",
+  "default_install_subdir": "security/vaultwarden",
+  "required_placeholders": ["VW_DATA_PATH"]
+}

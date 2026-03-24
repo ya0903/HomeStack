@@ -1,0 +1,7 @@
+{
+  "id": "immich",
+  "name": "Immich",
+  "description": "Deploy Immich with library and Postgres data mappings.",
+  "default_install_subdir": "photos/immich",
+  "required_placeholders": ["IMMICH_UPLOAD_PATH", "IMMICH_DB_DATA_PATH"]
+}

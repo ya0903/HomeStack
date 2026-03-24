@@ -1,0 +1,7 @@
+{
+  "id": "komga",
+  "name": "Komga",
+  "description": "Deploy Komga for manga, comics and ebooks with a dedicated config path and library mount.",
+  "default_install_subdir": "media/komga",
+  "required_placeholders": ["KOMGA_CONFIG_PATH", "KOMGA_LIBRARY_PATH"]
+}

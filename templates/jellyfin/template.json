@@ -1,0 +1,7 @@
+{
+  "id": "jellyfin",
+  "name": "Jellyfin",
+  "description": "Deploy Jellyfin with configurable config, cache and media mappings.",
+  "default_install_subdir": "media/jellyfin",
+  "required_placeholders": ["JF_CONFIG_PATH", "JF_CACHE_PATH", "JF_MEDIA_PATH"]
+}
