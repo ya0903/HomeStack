@@ -401,7 +401,6 @@ function templateExample() {
   document.getElementById('builderDescription').value = 'Example custom template for a Linux friendly Nextcloud deployment.';
   document.getElementById('builderSubdir').value = 'cloud/nextcloud';
   document.getElementById('builderPlaceholders').value = 'NC_CONFIG_PATH
-NC_DATA_PATH';
   document.getElementById('builderCompose').value = `services:
   app:
     image: nextcloud:stable
