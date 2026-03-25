@@ -217,12 +217,10 @@
         <div class="panel-header compact">
           <h3>Install from Git URL</h3>
         </div>
-        <div class="button-row" style="align-items:flex-end">
-          <label style="flex:1">
-            Git repository URL
-            <input id="pluginGitUrl" type="text" placeholder="https://github.com/user/my-homestack-plugin" />
-          </label>
-          <button id="pluginInstallGitBtn" class="primary" style="flex-shrink:0">Install</button>
+        <span style="font-size:0.82rem;color:var(--text-2);display:block;margin-bottom:0.4rem">Git repository URL</span>
+        <div style="display:flex;gap:0.5rem">
+          <input id="pluginGitUrl" type="text" placeholder="https://github.com/user/my-homestack-plugin" style="flex:1" />
+          <button id="pluginInstallGitBtn" class="primary">Install</button>
         </div>
       </div>
 
@@ -230,12 +228,10 @@
         <div class="panel-header compact">
           <h3>Install from ZIP</h3>
         </div>
-        <div class="button-row" style="align-items:flex-end">
-          <label style="flex:1">
-            Plugin ZIP file
-            <input id="pluginZipFile" type="file" accept=".zip" />
-          </label>
-          <button id="pluginInstallZipBtn" class="primary" style="flex-shrink:0">Upload</button>
+        <span style="font-size:0.82rem;color:var(--text-2);display:block;margin-bottom:0.4rem">Plugin ZIP file</span>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <input id="pluginZipFile" type="file" accept=".zip" style="flex:1" />
+          <button id="pluginInstallZipBtn" class="primary">Upload</button>
         </div>
       </div>
 
