@@ -414,6 +414,7 @@ def get_stack_runtime_status(stack_name: str) -> Dict[str, object]:
                         'Service': stack_name,
                         'State': c.get('State', 'unknown'),
                         'Status': c.get('Status', ''),
+                        'Ports': c.get('Ports', ''),
                     })
                 except Exception:
                     continue
