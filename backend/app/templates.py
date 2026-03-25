@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import List
 
 from .models import StackTemplate, StackTemplateCreateRequest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(os.environ.get('APP_ROOT', str(Path(__file__).resolve().parents[2])))
 TEMPLATES_DIR = ROOT / 'templates'
 CUSTOM_TEMPLATES_DIR = ROOT / 'data' / 'custom_templates'
 

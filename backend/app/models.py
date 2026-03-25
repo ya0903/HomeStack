@@ -76,6 +76,31 @@ class StackDeploymentResponse(BaseModel):
     message: str
 
 
+class RawDeploymentRequest(BaseModel):
+    stack_name: str
+    install_path: str
+    compose_content: str
+
+    @field_validator('stack_name')
+    @classmethod
+    def validate_stack_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('stack_name cannot be empty')
+        invalid = set('/\\ ')
+        if any(ch in invalid for ch in value):
+            raise ValueError('stack_name must not contain spaces or path separators')
+        return value
+
+    @field_validator('install_path')
+    @classmethod
+    def validate_install_path(cls, value: str) -> str:
+        value = value.strip()
+        if not value.startswith('/'):
+            raise ValueError('install_path must be an absolute Linux path')
+        return value
+
+
 class StackActionRequest(BaseModel):
     action: str
 

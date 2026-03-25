@@ -14,7 +14,8 @@ from fastapi import Header, HTTPException, Request
 
 from .models import UserResponse
 
-ROOT = Path(__file__).resolve().parents[2]
+import os
+ROOT = Path(os.environ.get('APP_ROOT', str(Path(__file__).resolve().parents[2])))
 DATA_DIR = ROOT / 'data'
 USERS_FILE = DATA_DIR / 'users.json'
 SECRET_FILE = DATA_DIR / 'secret.key'

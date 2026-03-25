@@ -8,10 +8,11 @@ from typing import Dict, List
 
 import jinja2
 
-from .models import StackDeploymentRequest, StackDeploymentResponse, VolumeOption
+from .models import RawDeploymentRequest, StackDeploymentRequest, StackDeploymentResponse, VolumeOption
 from .templates import get_template_by_id
 
-ROOT = Path(__file__).resolve().parents[2]
+import os
+ROOT = Path(os.environ.get('APP_ROOT', str(Path(__file__).resolve().parents[2])))
 STACKS_DIR = ROOT / 'data' / 'stacks'
 
 
@@ -28,6 +29,24 @@ def compose_available() -> bool:
         return False
     result = _run_command(['docker', 'compose', 'version'])
     return result.returncode == 0
+
+
+def list_all_containers() -> List[Dict[str, object]]:
+    if not docker_available():
+        return []
+    result = _run_command(['docker', 'ps', '-a', '--format', '{{json .}}'])
+    if result.returncode != 0:
+        return []
+    containers = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            containers.append(json.loads(line))
+        except Exception:
+            continue
+    return containers
 
 
 def list_named_volumes() -> List[VolumeOption]:
@@ -167,6 +186,42 @@ def _write_stack_files(request: StackDeploymentRequest) -> StackDeploymentRespon
         compose_path=str(compose_path),
         message='Stack files saved successfully',
     )
+
+
+def deploy_raw_stack(request: RawDeploymentRequest) -> StackDeploymentResponse:
+    stack_root = _stack_root(request.stack_name)
+    install_path = Path(request.install_path)
+    install_path.mkdir(parents=True, exist_ok=True)
+    stack_root.mkdir(parents=True, exist_ok=True)
+
+    compose_path = stack_root / 'docker-compose.yml'
+    compose_path.write_text(request.compose_content, encoding='utf-8')
+
+    metadata = {
+        'stack_name': request.stack_name,
+        'template_id': '__custom__',
+        'install_path': str(install_path),
+        'placeholders': {},
+        'named_volume_bindings': {},
+        'compose_path': str(compose_path),
+    }
+    _stack_meta_path(request.stack_name).write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
+
+    response = StackDeploymentResponse(
+        ok=True,
+        stack_name=request.stack_name,
+        install_path=str(install_path),
+        compose_path=str(compose_path),
+        message='Stack files saved successfully',
+    )
+    if compose_available():
+        result = _compose_command_for_stack(request.stack_name, ['up', '-d'])
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'docker compose failed')
+        response.message = 'Stack deployed successfully with docker compose up -d'
+    else:
+        response.message = 'Compose file generated, but Docker Compose was not available on this system'
+    return response
 
 
 def deploy_stack(request: StackDeploymentRequest) -> StackDeploymentResponse:
@@ -351,6 +406,117 @@ def get_stack_logs(stack_name: str, tail: int = 200) -> str:
         return result.stderr.strip() or result.stdout.strip() or 'Unable to read logs'
     return result.stdout.strip() or 'No logs yet'
 
+
+
+def import_container(container_name: str) -> Dict[str, object]:
+    if not docker_available():
+        raise ValueError('Docker is not available')
+    result = _run_command(['docker', 'inspect', container_name])
+    if result.returncode != 0:
+        raise ValueError(f'Container not found: {container_name}')
+    try:
+        data = json.loads(result.stdout)
+    except Exception as exc:
+        raise ValueError('Failed to parse docker inspect output') from exc
+    if not data:
+        raise ValueError(f'No inspect data for: {container_name}')
+
+    inspect = data[0]
+    config = inspect.get('Config') or {}
+    host_config = inspect.get('HostConfig') or {}
+
+    name = inspect.get('Name', '').lstrip('/')
+    image = config.get('Image', 'unknown')
+    restart = (host_config.get('RestartPolicy') or {}).get('Name', 'unless-stopped')
+    if not restart or restart == 'no':
+        restart = 'unless-stopped'
+
+    lines = [
+        'services:',
+        f'  {name}:',
+        f'    image: {image}',
+        f'    container_name: {name}',
+        f'    restart: {restart}',
+    ]
+
+    port_bindings = host_config.get('PortBindings') or {}
+    if port_bindings:
+        lines.append('    ports:')
+        for cport_proto, host_bindings in port_bindings.items():
+            cport = cport_proto.split('/')[0]
+            for binding in (host_bindings or []):
+                hport = binding.get('HostPort', '')
+                if hport:
+                    lines.append(f'      - "{hport}:{cport}"')
+
+    binds = host_config.get('Binds') or []
+    if binds:
+        lines.append('    volumes:')
+        for bind in binds:
+            lines.append(f'      - {bind}')
+
+    skip_prefixes = ('PATH=', 'HOME=', 'HOSTNAME=', 'TERM=', 'SHLVL=', 'PWD=')
+    filtered_env = [e for e in (config.get('Env') or []) if not any(e.startswith(p) for p in skip_prefixes)]
+    if filtered_env:
+        lines.append('    environment:')
+        for env in filtered_env:
+            lines.append(f'      - {env}')
+
+    compose_content = '\n'.join(lines) + '\n'
+
+    if _stack_meta_path(name).exists():
+        raise ValueError(f'Stack "{name}" already exists in HomeStack')
+
+    STACKS_DIR.mkdir(parents=True, exist_ok=True)
+    stack_root = _stack_root(name)
+    stack_root.mkdir(parents=True, exist_ok=True)
+    compose_path = stack_root / 'docker-compose.yml'
+    compose_path.write_text(compose_content, encoding='utf-8')
+
+    metadata = {
+        'stack_name': name,
+        'template_id': '__imported__',
+        'install_path': str(stack_root),
+        'placeholders': {},
+        'named_volume_bindings': {},
+        'compose_path': str(compose_path),
+    }
+    _stack_meta_path(name).write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
+    return {'ok': True, 'stack_name': name, 'compose_path': str(compose_path)}
+
+
+def pull_and_redeploy(stack_name: str) -> Dict[str, object]:
+    if not compose_available():
+        raise RuntimeError('Docker Compose not available')
+    pull = _compose_command_for_stack(stack_name, ['pull'])
+    if pull.returncode != 0:
+        raise RuntimeError(pull.stderr.strip() or pull.stdout.strip() or 'docker compose pull failed')
+    up = _compose_command_for_stack(stack_name, ['up', '-d'])
+    if up.returncode != 0:
+        raise RuntimeError(up.stderr.strip() or up.stdout.strip() or 'docker compose up failed')
+    return {
+        'ok': True,
+        'stack_name': stack_name,
+        'message': 'Images pulled and stack redeployed',
+        'runtime': get_stack_runtime_status(stack_name),
+    }
+
+
+def get_stack_disk_usage(stack_name: str) -> Dict[str, object]:
+    metadata = _read_stack_metadata(stack_name)
+    install_path = metadata.get('install_path', '')
+    size_str = 'N/A'
+    if install_path and Path(install_path).exists():
+        try:
+            result = subprocess.run(
+                ['du', '-sh', '--apparent-size', install_path],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                size_str = result.stdout.split()[0]
+        except Exception:
+            size_str = 'N/A'
+    return {'stack_name': stack_name, 'install_path': install_path, 'disk_usage': size_str}
 
 
 def run_stack_action(stack_name: str, action: str) -> Dict[str, object]:

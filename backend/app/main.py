@@ -14,17 +14,23 @@ from .auth import (
 from .docker_ops import (
     compose_available,
     delete_stack,
+    deploy_raw_stack,
     deploy_stack,
     docker_available,
     get_stack,
+    get_stack_disk_usage,
     get_stack_logs,
     get_stack_runtime_status,
+    import_container,
+    list_all_containers,
     list_deployed_stacks,
     list_named_volumes,
+    pull_and_redeploy,
     run_stack_action,
     update_stack,
 )
 from .models import (
+    RawDeploymentRequest,
     StackActionRequest,
     StackDeploymentRequest,
     StackTemplateCreateRequest,
@@ -104,6 +110,22 @@ def volumes(user=Depends(get_current_user)) -> list:
     return [volume.model_dump() for volume in list_named_volumes()]
 
 
+@app.get('/api/containers')
+def containers(user=Depends(get_current_user)) -> list:
+    return list_all_containers()
+
+
+@app.post('/api/deploy/raw')
+def deploy_raw(request: RawDeploymentRequest, user=Depends(get_current_user)) -> dict:
+    try:
+        response = deploy_raw_stack(request)
+        return response.model_dump()
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.get('/api/stacks')
 def stacks(user=Depends(get_current_user)) -> list:
     return list_deployed_stacks()
@@ -157,6 +179,32 @@ def stack_action(stack_name: str, request: StackActionRequest, user=Depends(get_
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post('/api/stacks/{stack_name}/pull')
+def pull_stack(stack_name: str, user=Depends(get_current_user)) -> dict:
+    try:
+        return pull_and_redeploy(stack_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get('/api/stacks/{stack_name}/diskusage')
+def stack_disk_usage(stack_name: str, user=Depends(get_current_user)) -> dict:
+    try:
+        return get_stack_disk_usage(stack_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post('/api/containers/{container_name}/import')
+def import_container_endpoint(container_name: str, user=Depends(get_current_user)) -> dict:
+    try:
+        return import_container(container_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.delete('/api/stacks/{stack_name}')

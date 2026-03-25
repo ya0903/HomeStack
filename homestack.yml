@@ -5,8 +5,9 @@ services:
       dockerfile: backend/Dockerfile
     container_name: homestack-backend
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     environment:
+      APP_ROOT: /app
       AUTH_MODE: ${AUTH_MODE:-local}
       AUTHELIA_LOGIN_URL: ${AUTHELIA_LOGIN_URL:-/}
       AUTHELIA_USER_HEADER: ${AUTHELIA_USER_HEADER:-Remote-User}
@@ -15,13 +16,18 @@ services:
       - ./templates:/app/templates
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro
     restart: unless-stopped
 
   frontend:
     image: nginx:alpine
     container_name: homestack-frontend
     ports:
-      - "8080:80"
+      - "${FRONTEND_PORT:-8080}:80"
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
     restart: unless-stopped
