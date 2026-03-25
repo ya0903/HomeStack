@@ -321,6 +321,7 @@ def list_deployed_stacks() -> List[Dict[str, object]]:
                 'exists': compose_file.exists(),
                 'template_id': metadata.get('template_id'),
                 'install_path': metadata.get('install_path'),
+                'category': get_stack_category(child.name),
                 'runtime': status,
             }
         )
@@ -551,6 +552,135 @@ def get_stack_disk_usage(stack_name: str) -> Dict[str, object]:
         except Exception:
             size_str = 'N/A'
     return {'stack_name': stack_name, 'install_path': install_path, 'disk_usage': size_str}
+
+
+_DATA_DIR = Path('/app/data')
+_CATEGORIES_FILE = _DATA_DIR / 'categories.json'
+_HEALTH_CHECKS_FILE = _DATA_DIR / 'health_checks.json'
+
+
+# ── Categories ────────────────────────────────────────────────────────────────
+
+def _load_categories() -> Dict[str, str]:
+    if not _CATEGORIES_FILE.exists():
+        return {}
+    try:
+        return json.loads(_CATEGORIES_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _save_categories(cats: Dict[str, str]) -> None:
+    _CATEGORIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CATEGORIES_FILE.write_text(json.dumps(cats, indent=2))
+
+
+def set_stack_category(stack_name: str, category: str) -> None:
+    cats = _load_categories()
+    if category:
+        cats[stack_name] = category
+    else:
+        cats.pop(stack_name, None)
+    _save_categories(cats)
+
+
+def get_stack_category(stack_name: str) -> str:
+    return _load_categories().get(stack_name, '')
+
+
+def list_categories() -> List[str]:
+    cats = _load_categories()
+    return sorted(set(cats.values()))
+
+
+# ── Health checks ─────────────────────────────────────────────────────────────
+
+def _load_health_configs() -> Dict[str, Dict]:
+    if not _HEALTH_CHECKS_FILE.exists():
+        return {}
+    try:
+        return json.loads(_HEALTH_CHECKS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def save_health_config(stack_name: str, url: str, expected_status: int = 200) -> None:
+    configs = _load_health_configs()
+    configs[stack_name] = {'url': url, 'expected_status': expected_status}
+    _HEALTH_CHECKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _HEALTH_CHECKS_FILE.write_text(json.dumps(configs, indent=2))
+
+
+def delete_health_config(stack_name: str) -> None:
+    configs = _load_health_configs()
+    configs.pop(stack_name, None)
+    _HEALTH_CHECKS_FILE.write_text(json.dumps(configs, indent=2))
+
+
+def run_health_check(stack_name: str) -> Dict[str, object]:
+    import time
+    import urllib.request as _url
+    configs = _load_health_configs()
+    config = configs.get(stack_name)
+    if not config:
+        return {'configured': False}
+    url = config['url']
+    expected = config.get('expected_status', 200)
+    start = time.monotonic()
+    try:
+        resp = _url.urlopen(url, timeout=5)
+        status = resp.getcode()
+        elapsed = round((time.monotonic() - start) * 1000)
+        return {'configured': True, 'ok': status == expected, 'status': status,
+                'elapsed_ms': elapsed, 'url': url}
+    except Exception as exc:
+        elapsed = round((time.monotonic() - start) * 1000)
+        return {'configured': True, 'ok': False, 'error': str(exc),
+                'elapsed_ms': elapsed, 'url': url}
+
+
+# ── Resource usage ────────────────────────────────────────────────────────────
+
+def get_container_resources() -> List[Dict[str, object]]:
+    if not docker_available():
+        return []
+    result = _run_command(['docker', 'stats', '--no-stream', '--format', '{{json .}}'])
+    if result.returncode != 0:
+        return []
+    resources = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            resources.append(json.loads(line))
+        except Exception:
+            continue
+    return resources
+
+
+# ── Backup / Restore ──────────────────────────────────────────────────────────
+
+def create_backup_archive() -> bytes:
+    import io
+    import tarfile
+    data_dir = _DATA_DIR
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+        if data_dir.exists():
+            tar.add(str(data_dir), arcname='data')
+    return buf.getvalue()
+
+
+def restore_backup_archive(archive_bytes: bytes) -> None:
+    import io
+    import tarfile
+    buf = io.BytesIO(archive_bytes)
+    with tarfile.open(fileobj=buf, mode='r:gz') as tar:
+        for member in tar.getmembers():
+            if '..' in member.name or member.name.startswith('/'):
+                raise ValueError('Archive contains unsafe paths')
+        tar.extractall('/app')
 
 
 def run_stack_action(stack_name: str, action: str) -> Dict[str, object]:

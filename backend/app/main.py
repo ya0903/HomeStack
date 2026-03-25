@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import io
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from .auth import (
     authenticate_user,
@@ -14,33 +15,48 @@ from .auth import (
 )
 from .docker_ops import (
     compose_available,
+    create_backup_archive,
+    delete_health_config,
     delete_stack,
     deploy_raw_stack,
     deploy_stack,
     docker_available,
+    get_container_resources,
     get_stack,
+    get_stack_category,
     get_stack_disk_usage,
     get_stack_logs,
     get_stack_runtime_status,
     import_container,
     list_all_containers,
+    list_categories,
     list_deployed_stacks,
     list_named_volumes,
     pull_and_redeploy,
+    restore_backup_archive,
+    run_health_check,
     run_stack_action,
+    save_health_config,
+    set_stack_category,
     update_stack,
 )
 from .models import (
+    NotificationSettingsRequest,
     PluginGitInstallRequest,
     RawDeploymentRequest,
     StackActionRequest,
+    StackCategoryRequest,
     StackDeploymentRequest,
+    StackHealthConfigRequest,
+    StackScheduleRequest,
     StackTemplateCreateRequest,
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
 )
 from .templates import create_custom_template, get_templates
+from .notifications import load_notification_settings, save_notification_settings, send_notification
+from .scheduler import delete_schedule, get_schedule, list_schedules, set_schedule, start_scheduler
 from .plugin_ops import (
     get_plugin_asset_path,
     install_plugin_from_git,
@@ -50,7 +66,12 @@ from .plugin_ops import (
     uninstall_plugin,
 )
 
-app = FastAPI(title='HomeStack API', version='0.3.0')
+app = FastAPI(title='HomeStack API', version='0.4.0')
+
+
+@app.on_event('startup')
+def on_startup() -> None:
+    start_scheduler()
 
 app.add_middleware(
     CORSMiddleware,
@@ -163,6 +184,7 @@ def stack_logs(stack_name: str, user=Depends(get_current_user)) -> dict:
 def create_stack(request: StackDeploymentRequest, user=Depends(get_current_user)) -> dict:
     try:
         response = deploy_stack(request)
+        send_notification('stack_deployed', 'Stack deployed', f'{request.stack_name} deployed successfully')
         return response.model_dump()
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -224,7 +246,9 @@ def remove_stack(
     user=Depends(get_current_user),
 ) -> dict:
     try:
-        return delete_stack(stack_name, delete_data)
+        result = delete_stack(stack_name, delete_data)
+        send_notification('stack_deleted', 'Stack deleted', f'{stack_name} was deleted')
+        return result
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -279,3 +303,117 @@ def plugin_asset(plugin_id: str, filename: str, user=Depends(get_current_user)):
         return FileResponse(str(path))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ── Categories ────────────────────────────────────────────────────────────────
+
+@app.get('/api/categories')
+def categories(user=Depends(get_current_user)) -> list:
+    return list_categories()
+
+
+@app.get('/api/categories/map')
+def categories_map(user=Depends(get_current_user)) -> dict:
+    from .docker_ops import _load_categories
+    return _load_categories()
+
+
+@app.put('/api/stacks/{stack_name}/category')
+def set_category(stack_name: str, request: StackCategoryRequest, user=Depends(get_current_user)) -> dict:
+    set_stack_category(stack_name, request.category)
+    return {'ok': True, 'stack_name': stack_name, 'category': request.category}
+
+
+# ── Health checks ─────────────────────────────────────────────────────────────
+
+@app.get('/api/stacks/{stack_name}/health')
+def stack_health(stack_name: str, user=Depends(get_current_user)) -> dict:
+    return run_health_check(stack_name)
+
+
+@app.put('/api/stacks/{stack_name}/health')
+def set_stack_health(stack_name: str, request: StackHealthConfigRequest, user=Depends(get_current_user)) -> dict:
+    save_health_config(stack_name, request.url, request.expected_status)
+    return {'ok': True, 'stack_name': stack_name, 'url': request.url}
+
+
+@app.delete('/api/stacks/{stack_name}/health')
+def remove_stack_health(stack_name: str, user=Depends(get_current_user)) -> dict:
+    delete_health_config(stack_name)
+    return {'ok': True}
+
+
+# ── Resource usage ────────────────────────────────────────────────────────────
+
+@app.get('/api/resources')
+def container_resources(user=Depends(get_current_user)) -> list:
+    return get_container_resources()
+
+
+# ── Schedules ─────────────────────────────────────────────────────────────────
+
+@app.get('/api/schedules')
+def schedules(user=Depends(get_current_user)) -> dict:
+    return list_schedules()
+
+
+@app.put('/api/stacks/{stack_name}/schedule')
+def set_stack_schedule(stack_name: str, request: StackScheduleRequest, user=Depends(get_current_user)) -> dict:
+    try:
+        result = set_schedule(stack_name, request.cron, request.enabled)
+        return {'ok': True, 'stack_name': stack_name, **result}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete('/api/stacks/{stack_name}/schedule')
+def remove_stack_schedule(stack_name: str, user=Depends(get_current_user)) -> dict:
+    delete_schedule(stack_name)
+    return {'ok': True}
+
+
+@app.get('/api/stacks/{stack_name}/schedule')
+def get_stack_schedule_endpoint(stack_name: str, user=Depends(get_current_user)) -> dict:
+    schedule = get_schedule(stack_name)
+    return schedule or {}
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+@app.get('/api/settings/notifications')
+def get_notifications(user=Depends(get_current_user)) -> dict:
+    return load_notification_settings()
+
+
+@app.put('/api/settings/notifications')
+def update_notifications(request: NotificationSettingsRequest, user=Depends(get_current_user)) -> dict:
+    save_notification_settings(request.model_dump())
+    return {'ok': True}
+
+
+@app.post('/api/settings/notifications/test')
+def test_notification(user=Depends(get_current_user)) -> dict:
+    send_notification('test', 'HomeStack test', 'Your notification settings are working.')
+    return {'ok': True, 'message': 'Test notification sent'}
+
+
+# ── Backup / Restore ──────────────────────────────────────────────────────────
+
+@app.get('/api/backup')
+def backup(user=Depends(get_current_user)):
+    data = create_backup_archive()
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type='application/gzip',
+        headers={'Content-Disposition': 'attachment; filename="homestack-backup.tar.gz"'},
+    )
+
+
+@app.post('/api/restore')
+async def restore(file: UploadFile = File(...), user=Depends(get_current_user)) -> dict:
+    try:
+        content = await file.read()
+        restore_backup_archive(content)
+        return {'ok': True, 'message': 'Backup restored successfully. Restart HomeStack to apply.'}
+    except (ValueError, Exception) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

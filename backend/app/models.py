@@ -152,6 +152,45 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
+class StackCategoryRequest(BaseModel):
+    category: str
+
+
+class StackHealthConfigRequest(BaseModel):
+    url: str
+    expected_status: int = 200
+
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        value = value.strip()
+        if not value.startswith(('http://', 'https://')):
+            raise ValueError('url must start with http:// or https://')
+        return value
+
+
+class StackScheduleRequest(BaseModel):
+    cron: str
+    enabled: bool = True
+
+    @field_validator('cron')
+    @classmethod
+    def validate_cron(cls, value: str) -> str:
+        value = value.strip()
+        parts = value.split()
+        if len(parts) != 5:
+            raise ValueError('cron must have exactly 5 fields (e.g. "0 3 * * *")')
+        return value
+
+
+class NotificationSettingsRequest(BaseModel):
+    enabled: bool = False
+    discord_webhook: str = ''
+    ntfy_url: str = ''
+    webhook_url: str = ''
+    events: List[str] = Field(default_factory=lambda: ['stack_deployed', 'stack_deleted', 'health_fail'])
+
+
 class PluginGitInstallRequest(BaseModel):
     git_url: str
 
