@@ -490,6 +490,16 @@ select {
 .toast-info    { border-left-color: var(--accent);  }
 .toast-warning { border-left-color: var(--warning); }
 
+/* ── Port tags ──────────────────────────────── */
+.port-tags { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.port-tag {
+  font-size: 0.72rem; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background: var(--bg-input); color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 0.1em 0.45em;
+}
+
 /* ── Misc ───────────────────────────────────── */
 .hidden { display: none !important; }
 .hint    { color: var(--text-3); font-size: 0.78rem; }

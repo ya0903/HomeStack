@@ -343,6 +343,30 @@ function collectPayload() {
   };
 }
 
+function extractStackPorts(containers) {
+  const seen = new Set();
+  const ports = [];
+  for (const c of containers) {
+    // docker compose ps format: Publishers array
+    if (Array.isArray(c.Publishers)) {
+      for (const p of c.Publishers) {
+        if (p.PublishedPort) {
+          const label = `${p.PublishedPort}→${p.TargetPort}`;
+          if (!seen.has(label)) { seen.add(label); ports.push(label); }
+        }
+      }
+    }
+    // fallback docker ps format: Ports string e.g. "0.0.0.0:8080->80/tcp"
+    if (typeof c.Ports === 'string' && c.Ports) {
+      for (const m of c.Ports.matchAll(/(?:[\d.]+|:::):(\d+)->(\d+)/g)) {
+        const label = `${m[1]}→${m[2]}`;
+        if (!seen.has(label)) { seen.add(label); ports.push(label); }
+      }
+    }
+  }
+  return ports;
+}
+
 function renderStacks(filter = '') {
   const term = filter.toLowerCase();
   const filtered = term
@@ -365,6 +389,8 @@ function renderStacks(filter = '') {
       const cState = String(c.State || '').toLowerCase();
       return `<span class="container-tag ${cState === 'running' ? 'tag-ok' : 'tag-stopped'}">${escapeHtml(c.Service || c.Name || 'container')}</span>`;
     }).join('') || '';
+    const ports = extractStackPorts(containers);
+    const portTags = ports.map(p => `<span class="port-tag">${escapeHtml(p)}</span>`).join('');
     return `
       <div class="stack-card">
         <div class="stack-card-header">
@@ -372,6 +398,7 @@ function renderStacks(filter = '') {
             <span class="status-dot ${dotClass}"></span>
             <strong>${name}</strong>
             <span class="badge ${badgeClass}">${summary}</span>
+            ${portTags ? `<span class="port-tags">${portTags}</span>` : ''}
           </div>
           <div class="stack-card-meta">
             <span class="meta-item">🧩 ${escapeHtml(stack.template_id || 'custom')}</span>
