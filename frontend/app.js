@@ -1,6 +1,14 @@
 const API_BASE = '';
 // For local dev with separate servers, set API_BASE = 'http://localhost:8000'
 
+function getUsedHostPorts() {
+  const ports = new Set();
+  state.containers.forEach(c => {
+    for (const m of (c.Ports || '').matchAll(/(?:[\d.]+|:::):(\d+)->/g)) ports.add(m[1]);
+  });
+  return ports;
+}
+
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -13,6 +21,8 @@ function escapeHtml(str) {
 const state = {
   templates: [],
   volumes: [],
+  containers: [],
+  stacks: [],
   health: null,
   authConfig: { mode: 'local', login_url: '/', local_auth_enabled: true },
   token: localStorage.getItem('homeStackToken') || '',
@@ -104,26 +114,35 @@ function activeTemplate() {
 }
 
 function renderTemplates() {
-  els.templateSelect.innerHTML = state.templates
+  const customOpt = '<option value="__custom__">-- Custom (paste docker-compose) --</option>';
+  els.templateSelect.innerHTML = customOpt + state.templates
     .map(t => `<option value="${t.id}">${t.name} (${t.source})</option>`)
     .join('');
-  if (state.templates.length && !els.templateSelect.value) {
-    els.templateSelect.value = state.templates[0].id;
+  if (!els.templateSelect.value) {
+    els.templateSelect.value = '__custom__';
   }
-  if (state.templates.length && !state.editingStack) applyTemplateDefaults();
+  if (!state.editingStack) applyTemplateDefaults();
 }
 
 function applyTemplateDefaults() {
   const tpl = activeTemplate();
-  if (!tpl) return;
-  if (!els.stackName.value) els.stackName.value = tpl.id;
-  if (!els.installPath.value) els.installPath.value = `/opt/homelab/${tpl.default_install_subdir}`;
+  if (tpl) {
+    if (!els.stackName.value) els.stackName.value = tpl.id;
+    if (!els.installPath.value) els.installPath.value = `/opt/homelab/${tpl.default_install_subdir}`;
+  }
   renderDynamicFields();
 }
 
 function renderDynamicFields(existing = {}) {
+  const isCustom = els.templateSelect.value === '__custom__';
+  document.getElementById('customComposeField').classList.toggle('hidden', !isCustom);
+
   const tpl = activeTemplate();
-  if (!tpl) return;
+  if (!tpl || isCustom) {
+    els.dynamicFields.innerHTML = '';
+    els.volumeBindings.innerHTML = '';
+    return;
+  }
 
   els.dynamicFields.innerHTML = tpl.required_placeholders.map(key => {
     const suffix = key.replace(/^[A-Z]+_/, '').toLowerCase();
@@ -175,26 +194,33 @@ function collectPayload() {
   };
 }
 
-async function refreshStacks() {
-  const stacks = await api('/api/stacks');
-  if (!stacks.length) {
-    els.stacksList.innerHTML = '<div class="card">No stacks deployed yet.</div>';
+function renderStacks(filter = '') {
+  const term = filter.toLowerCase();
+  const filtered = term
+    ? state.stacks.filter(s => s.stack_name.toLowerCase().includes(term) || (s.template_id || '').toLowerCase().includes(term))
+    : state.stacks;
+
+  if (!filtered.length) {
+    els.stacksList.innerHTML = `<div class="card">${term ? 'No stacks match your search.' : 'No stacks deployed yet.'}</div>`;
     return;
   }
 
-  els.stacksList.innerHTML = stacks.map(stack => {
+  els.stacksList.innerHTML = filtered.map(stack => {
     const containers = stack.runtime?.containers || [];
-    const runningClass = stack.runtime?.running ? 'ok' : 'danger';
+    const running = stack.runtime?.running;
+    const runningClass = running ? 'ok' : 'danger';
+    const dot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${running ? '#2ecc71' : '#e74c3c'};margin-right:6px;vertical-align:middle"></span>`;
     const name = escapeHtml(stack.stack_name);
     return `
       <div class="card card-grid">
         <div>
-          <h3>${name}</h3>
+          <h3>${dot}${name}</h3>
           <div class="kv">
             <strong>Template</strong><span>${escapeHtml(stack.template_id || 'Unknown')}</span>
             <strong>Install path</strong><span>${escapeHtml(stack.install_path || 'Unknown')}</span>
             <strong>Status</strong><span class="${runningClass}">${escapeHtml(stack.runtime?.summary || 'Unknown')}</span>
             <strong>Compose</strong><span>${escapeHtml(stack.compose_path || '')}</span>
+            <strong>Disk usage</strong><span id="disk-${name}"><button class="small" data-action="diskusage" data-stack-name="${name}">Check</button></span>
           </div>
           <div>
             ${containers.map(c => `<span class="tag">${escapeHtml(c.Service || c.Name || 'container')}: ${escapeHtml(String(c.State || 'unknown'))}</span>`).join('') || '<span class="hint">No container status yet.</span>'}
@@ -202,12 +228,13 @@ async function refreshStacks() {
         </div>
         <div>
           <div class="button-row">
-            <button data-action="edit" data-stack-name="${escapeHtml(stack.stack_name)}">Edit</button>
-            <button data-action="start" data-stack-name="${escapeHtml(stack.stack_name)}">Start</button>
-            <button data-action="stop" data-stack-name="${escapeHtml(stack.stack_name)}">Stop</button>
-            <button data-action="restart" data-stack-name="${escapeHtml(stack.stack_name)}">Restart</button>
-            <button data-action="logs" data-stack-name="${escapeHtml(stack.stack_name)}">Logs</button>
-            <button data-action="delete" data-stack-name="${escapeHtml(stack.stack_name)}">Delete</button>
+            <button data-action="edit" data-stack-name="${name}">Edit</button>
+            <button data-action="start" data-stack-name="${name}">Start</button>
+            <button data-action="stop" data-stack-name="${name}">Stop</button>
+            <button data-action="restart" data-stack-name="${name}">Restart</button>
+            <button data-action="update" data-stack-name="${name}">Update</button>
+            <button data-action="logs" data-stack-name="${name}">Logs</button>
+            <button data-action="delete" data-stack-name="${name}">Delete</button>
           </div>
           <details>
             <summary>Last action output</summary>
@@ -219,6 +246,12 @@ async function refreshStacks() {
   }).join('');
 }
 
+async function refreshStacks() {
+  const stacks = await api('/api/stacks');
+  state.stacks = stacks;
+  renderStacks(document.getElementById('stackSearch')?.value || '');
+}
+
 els.stacksList.addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
@@ -227,18 +260,62 @@ els.stacksList.addEventListener('click', async (e) => {
   if (action === 'edit') await editStack(stackName);
   else if (action === 'logs') await viewLogs(stackName);
   else if (action === 'delete') await deleteStack(stackName);
+  else if (action === 'update') await pullAndRedeployStack(stackName);
+  else if (action === 'diskusage') await checkDiskUsage(stackName);
   else await stackAction(stackName, action);
 });
 
 function renderSystemStatus() {
   if (!state.health) return;
+  const dockerOk = state.health.docker_available;
+  const composeOk = state.health.compose_available;
+  const term = (document.getElementById('containerSearch')?.value || '').toLowerCase();
+  const filtered = term
+    ? state.containers.filter(c =>
+        (c.Names || c.Name || '').toLowerCase().includes(term) ||
+        (c.Image || '').toLowerCase().includes(term))
+    : state.containers;
+
+  const containerRows = filtered.map(c => {
+    const rawName = (c.Names || c.Name || '').replace(/^\//, '');
+    const name = escapeHtml(rawName);
+    const image = escapeHtml(c.Image || '');
+    const status = escapeHtml(c.State || c.Status || '');
+    const ports = escapeHtml(c.Ports || '');
+    const stateClass = (c.State || '').toLowerCase() === 'running' ? 'ok' : 'danger';
+    const managed = state.stacks.some(s => s.stack_name === rawName);
+    const importBtn = managed
+      ? '<span class="hint">Managed</span>'
+      : `<button class="small" data-action="import" data-container-name="${name}">Import</button>`;
+    return `<tr>
+      <td style="padding:0.3em 0.6em">${name}</td>
+      <td style="padding:0.3em 0.6em">${image}</td>
+      <td style="padding:0.3em 0.6em" class="${stateClass}">${status}</td>
+      <td style="padding:0.3em 0.6em">${ports}</td>
+      <td style="padding:0.3em 0.6em">${importBtn}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="5" class="hint" style="padding:0.6em">${term ? 'No containers match search.' : 'No containers found (Docker may be unavailable)'}</td></tr>`;
+
   els.systemStatus.innerHTML = `
     <div class="grid">
-      <div class="card"><strong>Docker available</strong><div>${state.health.docker_available}</div></div>
-      <div class="card"><strong>Docker Compose available</strong><div>${state.health.compose_available}</div></div>
-      <div class="card"><strong>Auth mode</strong><div>${state.authConfig.mode}</div></div>
+      <div class="card"><strong>Docker available</strong><div class="${dockerOk ? 'ok' : 'danger'}">${dockerOk}</div></div>
+      <div class="card"><strong>Docker Compose available</strong><div class="${composeOk ? 'ok' : 'danger'}">${composeOk}</div></div>
+      <div class="card"><strong>Auth mode</strong><div>${escapeHtml(state.authConfig.mode)}</div></div>
       <div class="card"><strong>Named volumes</strong><div>${state.volumes.length}</div></div>
       <div class="card"><strong>Templates</strong><div>${state.templates.length}</div></div>
+    </div>
+    <h3 style="margin-top:1.5em">All containers on this host (${filtered.length}${term ? ' shown' : ''})</h3>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:0.9em">
+        <thead><tr style="text-align:left;border-bottom:1px solid #444">
+          <th style="padding:0.4em 0.6em">Name</th>
+          <th style="padding:0.4em 0.6em">Image</th>
+          <th style="padding:0.4em 0.6em">State</th>
+          <th style="padding:0.4em 0.6em">Ports</th>
+          <th style="padding:0.4em 0.6em">Actions</th>
+        </tr></thead>
+        <tbody>${containerRows}</tbody>
+      </table>
     </div>
   `;
 }
@@ -246,14 +323,16 @@ function renderSystemStatus() {
 async function refreshAll() {
   els.statusBox.textContent = 'Refreshing data...';
   try {
-    const [health, templates, volumes] = await Promise.all([
+    const [health, templates, volumes, containers] = await Promise.all([
       api('/api/health'),
       api('/api/templates'),
       api('/api/volumes'),
+      api('/api/containers'),
     ]);
     state.health = health;
     state.templates = templates;
     state.volumes = volumes;
+    state.containers = containers;
     renderTemplates();
     renderDynamicFields();
     renderSystemStatus();
@@ -266,6 +345,29 @@ async function refreshAll() {
 }
 
 async function deployStack() {
+  if (els.templateSelect.value === '__custom__') {
+    const composeContent = document.getElementById('customCompose').value.trim();
+    const stackName = els.stackName.value.trim();
+    const installPath = els.installPath.value.trim();
+    if (!composeContent) { els.statusBox.textContent = 'Paste docker-compose content first.'; return; }
+    if (!stackName) { els.statusBox.textContent = 'Stack name is required.'; return; }
+    if (!installPath) { els.statusBox.textContent = 'Install path is required.'; return; }
+    const usedPorts = getUsedHostPorts();
+    const conflicts = [...composeContent.matchAll(/"(\d+):\d+"/g)].map(m => m[1]).filter(p => usedPorts.has(p));
+    if (conflicts.length && !confirm(`Port(s) ${conflicts.join(', ')} are already in use by other containers. Deploy anyway?`)) return;
+    els.statusBox.textContent = 'Deploying custom stack...';
+    try {
+      const data = await api('/api/deploy/raw', {
+        method: 'POST',
+        body: JSON.stringify({ stack_name: stackName, install_path: installPath, compose_content: composeContent }),
+      });
+      els.statusBox.textContent = JSON.stringify(data, null, 2);
+      await refreshStacks();
+    } catch (err) {
+      els.statusBox.textContent = `Deploy failed: ${err.message}`;
+    }
+    return;
+  }
   const payload = collectPayload();
   els.statusBox.textContent = 'Deploying stack...';
   try {
@@ -367,6 +469,43 @@ async function deleteStack(stackName) {
   }
 }
 
+async function pullAndRedeployStack(stackName) {
+  els.statusBox.textContent = `Pulling latest images for ${stackName}...`;
+  try {
+    const data = await api(`/api/stacks/${stackName}/pull`, { method: 'POST' });
+    els.statusBox.textContent = data.message || 'Stack updated.';
+    const logBox = document.getElementById(`logs-${stackName}`);
+    if (logBox) logBox.textContent = JSON.stringify(data, null, 2);
+    await refreshStacks();
+  } catch (err) {
+    els.statusBox.textContent = `Update failed: ${err.message}`;
+  }
+}
+
+async function checkDiskUsage(stackName) {
+  const el = document.getElementById(`disk-${stackName}`);
+  if (el) el.textContent = 'Checking...';
+  try {
+    const data = await api(`/api/stacks/${stackName}/diskusage`);
+    if (el) el.textContent = data.disk_usage || 'N/A';
+  } catch (err) {
+    if (el) el.textContent = 'Error';
+  }
+}
+
+async function importContainer(containerName) {
+  if (!confirm(`Import "${containerName}" as a HomeStack-managed stack?\n\nThis generates a docker-compose.yml from the running container so you can manage it here.`)) return;
+  try {
+    await api(`/api/containers/${encodeURIComponent(containerName)}/import`, { method: 'POST' });
+    els.statusBox.textContent = `Imported "${containerName}" as a stack.`;
+    await refreshStacks();
+    renderSystemStatus();
+    switchView('stacks');
+  } catch (err) {
+    els.statusBox.textContent = `Import failed: ${err.message}`;
+  }
+}
+
 async function login() {
   try {
     const data = await api('/api/auth/login', {
@@ -400,7 +539,7 @@ function templateExample() {
   document.getElementById('builderName').value = 'Nextcloud Basic';
   document.getElementById('builderDescription').value = 'Example custom template for a Linux friendly Nextcloud deployment.';
   document.getElementById('builderSubdir').value = 'cloud/nextcloud';
-  document.getElementById('builderPlaceholders').value = 'NC_CONFIG_PATH
+  document.getElementById('builderPlaceholders').value = 'NC_CONFIG_PATH\nNC_DATA_PATH';
   document.getElementById('builderCompose').value = `services:
   app:
     image: nextcloud:stable
@@ -415,8 +554,7 @@ function templateExample() {
 
 async function saveTemplate() {
   const required_placeholders = document.getElementById('builderPlaceholders').value
-    .split('
-')
+    .split('\n')
     .map(v => v.trim())
     .filter(Boolean);
   try {
@@ -460,6 +598,22 @@ function wireNavigation() {
 
 els.templateSelect.addEventListener('change', () => renderDynamicFields());
 els.installPath.addEventListener('input', () => renderDynamicFields());
+els.stackName.addEventListener('input', () => {
+  const name = els.stackName.value.trim().toLowerCase();
+  const warn = document.getElementById('duplicateWarning');
+  if (!warn) return;
+  const match = state.containers.find(c => {
+    const cname = (c.Names || c.Name || '').replace(/^\//, '').toLowerCase();
+    return cname === name || cname.startsWith(name + '-') || cname.endsWith('-' + name);
+  });
+  if (match && name) {
+    const cname = (match.Names || match.Name || '').replace(/^\//, '');
+    warn.textContent = `Warning: a container named "${cname}" already exists (${match.State || match.Status || 'unknown state'}). Deploying may conflict.`;
+    warn.classList.remove('hidden');
+  } else {
+    warn.classList.add('hidden');
+  }
+});
 document.getElementById('refreshAll').addEventListener('click', refreshAll);
 document.getElementById('refreshStacksBtn').addEventListener('click', refreshStacks);
 document.getElementById('deployBtn').addEventListener('click', deployStack);
@@ -481,6 +635,34 @@ els.ssoRetryBtn.addEventListener('click', async () => {
     els.authStatus.textContent = `SSO check failed: ${err.message}`;
   }
 });
+
+els.systemStatus.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action="import"]');
+  if (!btn) return;
+  await importContainer(btn.dataset.containerName);
+});
+
+document.getElementById('stackSearch').addEventListener('input', (e) => {
+  renderStacks(e.target.value);
+});
+
+document.getElementById('containerSearch').addEventListener('input', () => {
+  renderSystemStatus();
+});
+
+setInterval(async () => {
+  if (!state.user) return;
+  try {
+    const [containers, stacks] = await Promise.all([
+      api('/api/containers').catch(() => state.containers),
+      api('/api/stacks').catch(() => state.stacks),
+    ]);
+    state.containers = containers;
+    state.stacks = stacks;
+    renderSystemStatus();
+    renderStacks(document.getElementById('stackSearch')?.value || '');
+  } catch { /* silent */ }
+}, 30000);
 
 wireNavigation();
 renderUser();
