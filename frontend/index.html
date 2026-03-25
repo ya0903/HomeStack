@@ -82,6 +82,9 @@
       <button class="nav-btn" data-view="system">
         <span class="nav-icon">⚙️</span> System
       </button>
+      <button class="nav-btn" data-view="images">
+        <span class="nav-icon">🖼</span> Images
+      </button>
       <button class="nav-btn" data-view="plugins">
         <span class="nav-icon">🔌</span> Plugins
       </button>
@@ -255,6 +258,22 @@
         <h2>🛠️ Settings</h2>
       </div>
 
+      <!-- User management (admin only) -->
+      <div class="subpanel" style="margin-bottom:1.2rem" id="userMgmtPanel">
+        <div class="panel-header compact"><h3>User management</h3></div>
+        <div id="usersList"><p class="hint">Loading…</p></div>
+        <div class="button-row" style="margin-top:0.75rem">
+          <input id="newUserUsername" type="text" placeholder="username" style="width:130px" />
+          <input id="newUserPassword" type="password" placeholder="password (min 8)" style="width:150px" />
+          <select id="newUserRole">
+            <option value="user">Viewer</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button id="createUserBtn" class="primary btn-sm">Add user</button>
+        </div>
+        <pre id="userMgmtStatus" style="margin-top:0.6rem">Admin only.</pre>
+      </div>
+
       <!-- Notifications -->
       <div class="subpanel" style="margin-bottom:1.2rem">
         <div class="panel-header compact"><h3>Notifications</h3></div>
@@ -306,6 +325,15 @@
         </div>
         <pre id="backupStatus" style="margin-top:0.75rem">Ready.</pre>
       </div>
+    </section>
+
+    <!-- Images -->
+    <section class="panel hidden" id="view-images">
+      <div class="panel-header">
+        <h2>🖼 Images</h2>
+        <button id="refreshImagesBtn">Refresh</button>
+      </div>
+      <div id="imagesList"><p class="hint">Loading images…</p></div>
     </section>
 
     <!-- Plugin-injected panels rendered here -->

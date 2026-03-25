@@ -538,6 +538,23 @@ pre {
   border: 1px solid var(--border);
 }
 
+/* ── User management rows ───────────────────── */
+.user-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.45rem 0.1rem; border-bottom: 1px solid var(--border);
+  font-size: 0.84rem; flex-wrap: wrap;
+}
+.user-row:last-child { border-bottom: none; }
+.user-row-name { flex: 1; min-width: 0; font-weight: 600; }
+
+/* ── Log toolbar ────────────────────────────── */
+.stack-logs summary {
+  display: flex; align-items: center;
+}
+.stack-logs summary button {
+  pointer-events: auto;
+}
+
 /* ── Category tabs ──────────────────────────── */
 .cat-tab {
   padding: 0.3em 0.9em; border-radius: 99px;

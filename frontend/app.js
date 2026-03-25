@@ -486,13 +486,18 @@ function renderStacks(filter = '') {
           <button class="btn-sm btn-success" data-action="start" data-stack-name="${name}">▶ Start</button>
           <button class="btn-sm btn-warning" data-action="stop" data-stack-name="${name}">⏹ Stop</button>
           <button class="btn-sm" data-action="restart" data-stack-name="${name}">↺ Restart</button>
-          <button class="btn-sm btn-accent" data-action="update" data-stack-name="${name}">⬆ Update</button>
-          <button class="btn-sm btn-ghost" data-action="logs" data-stack-name="${name}">📋 Logs</button>
+          <button class="btn-sm btn-accent" data-action="update" data-stack-name="${name}">⬆ Pull</button>
+          <button class="btn-sm btn-ghost" data-action="checkupdate" data-stack-name="${name}">🔍 Updates</button>
+          <button class="btn-sm btn-ghost" data-action="fetchlogs" data-stack-name="${name}">📋 Logs</button>
           <button class="btn-sm btn-danger" data-action="delete" data-stack-name="${name}">🗑 Delete</button>
+          <span id="update-${name}" class="badge badge-muted" style="display:none"></span>
         </div>
         <details class="stack-logs">
-          <summary>Last action output</summary>
-          <pre id="logs-${name}">Logs appear here.</pre>
+          <summary>
+            Logs
+            <button class="btn-xs btn-ghost" id="livebtn-${name}" data-action="livelog" data-stack-name="${name}" style="margin-left:0.5rem">⚡ Live</button>
+          </summary>
+          <pre id="logs-${name}">Click Logs for last output, or Live to stream.</pre>
         </details>
       </div>
     `;
@@ -528,6 +533,10 @@ els.stacksList.addEventListener('click', async (e) => {
   else if (action === 'healthcheck') await promptHealthConfig(stackName);
   else if (action === 'saveschedule') await saveSchedule(stackName);
   else if (action === 'delschedule') await deleteSchedule(stackName);
+  else if (action === 'checkupdate') { document.getElementById(`update-${stackName}`)?.style.removeProperty('display'); await checkStackUpdates(stackName); }
+  else if (action === 'fetchlogs') await viewLogs(stackName);
+  else if (action === 'livelog') startLiveLog(stackName);
+  else if (action === 'stoplogs') stopLiveLog(stackName);
   else await stackAction(stackName, action);
 });
 
@@ -566,11 +575,18 @@ function renderSystemStatus() {
     const importBtn = managed
       ? '<span class="hint">Managed</span>'
       : `<button class="small" data-action="import" data-container-name="${name}">Import</button>`;
+    const res = state.resources.find(r => (r.Name || '').replace(/^\//, '') === rawName) || {};
+    const cpu = escapeHtml(res.CPUPerc || '—');
+    const mem = escapeHtml(res.MemUsage || '—');
     return `<tr>
       <td style="padding:0.3em 0.6em">${name}</td>
       <td style="padding:0.3em 0.6em">${image}</td>
       <td style="padding:0.3em 0.6em" class="${stateClass}">${status}</td>
       <td style="padding:0.3em 0.6em">${ports}</td>
+      <td style="padding:0.3em 0.6em;font-size:0.75rem">
+        <span>${cpu}</span> · <span>${mem}</span>
+        <canvas data-sparkline="${rawName}" width="60" height="20" style="vertical-align:middle;margin-left:4px"></canvas>
+      </td>
       <td style="padding:0.3em 0.6em">${importBtn}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="5" class="hint" style="padding:0.6em">${term ? 'No containers match search.' : 'No containers found (Docker may be unavailable)'}</td></tr>`;
@@ -606,7 +622,7 @@ function renderSystemStatus() {
     <div class="table-wrap">
       <table class="data-table">
         <thead><tr>
-          <th>Name</th><th>Image</th><th>State</th><th>Ports</th><th>Actions</th>
+          <th>Name</th><th>Image</th><th>State</th><th>Ports</th><th>CPU / Memory</th><th>Actions</th>
         </tr></thead>
         <tbody>${containerRows}</tbody>
       </table>
@@ -632,7 +648,8 @@ async function refreshAll() {
     renderTemplates();
     renderDynamicFields();
     renderSystemStatus();
-    await refreshStacks();
+    await Promise.all([refreshStacks(), loadResourceHistory()]);
+    renderSparklines();
     await loadPlugins();
     els.statusBox.textContent = 'Ready.';
   } catch (err) {
@@ -694,6 +711,216 @@ async function saveEdit() {
     await refreshStacks();
   } catch (err) {
     els.statusBox.textContent = `Save failed: ${err.message}`;
+  }
+}
+
+// ── Image manager ─────────────────────────────────────────────────────────────
+
+async function loadImages() {
+  const list = document.getElementById('imagesList');
+  if (!list) return;
+  list.innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const images = await api('/api/images');
+    if (!images.length) { list.innerHTML = '<p class="hint">No images found.</p>'; return; }
+    list.innerHTML = `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Repository</th><th>Tag</th><th>Image ID</th><th>Size</th><th>Created</th><th></th></tr></thead>
+          <tbody>${images.map(img => `
+            <tr>
+              <td>${escapeHtml(img.Repository || '<none>')}</td>
+              <td>${escapeHtml(img.Tag || '<none>')}</td>
+              <td style="font-family:monospace;font-size:0.75rem">${escapeHtml((img.ID || '').slice(0, 17))}</td>
+              <td>${escapeHtml(img.Size || '')}</td>
+              <td>${escapeHtml(img.CreatedSince || img.CreatedAt || '')}</td>
+              <td><button class="btn-xs btn-danger" data-img-action="delete" data-img-ref="${escapeHtml(img.ID || '')}" title="Delete image">🗑</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (err) {
+    list.innerHTML = `<p class="hint">Error: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function deleteImage(ref) {
+  if (!confirm(`Delete image ${ref.slice(0, 20)}…? Containers using it must be stopped first.`)) return;
+  try {
+    await api(`/api/images?ref=${encodeURIComponent(ref)}`, { method: 'DELETE' });
+    toast('Image deleted.', 'success');
+    await loadImages();
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Update checks ─────────────────────────────────────────────────────────────
+
+async function checkStackUpdates(stackName) {
+  const badge = document.getElementById(`update-${stackName}`);
+  if (badge) badge.textContent = '⏳ Checking…';
+  try {
+    const data = await api(`/api/stacks/${encodeURIComponent(stackName)}/update-check`);
+    const updates = data.updates || [];
+    const available = updates.filter(u => u.status === 'update_available');
+    if (badge) {
+      if (available.length) {
+        badge.textContent = `⬆ ${available.length} update${available.length > 1 ? 's' : ''}`;
+        badge.className = 'badge badge-warning';
+      } else {
+        badge.textContent = '✓ Up to date';
+        badge.className = 'badge badge-success';
+      }
+    }
+    const details = updates.map(u => `${u.image}: ${u.status}${u.error ? ' — ' + u.error : ''}`).join('\n');
+    toast(`Update check for ${stackName}:\n${details}`, available.length ? 'warning' : 'success');
+  } catch (err) {
+    if (badge) badge.textContent = '? Check failed';
+    toast(`Update check failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Live log streaming ────────────────────────────────────────────────────────
+
+const _logStreams = {};
+
+function startLiveLog(stackName) {
+  stopLiveLog(stackName);
+  const logEl = document.getElementById(`logs-${stackName}`);
+  const btn = document.getElementById(`livebtn-${stackName}`);
+  if (!logEl) return;
+  logEl.textContent = 'Connecting to live stream…\n';
+
+  const tokenParam = state.authConfig.mode === 'local' && state.token
+    ? `?token=${encodeURIComponent(state.token)}`
+    : '';
+  const es = new EventSource(`${API_BASE}/api/stacks/${encodeURIComponent(stackName)}/logs/stream${tokenParam}`);
+  _logStreams[stackName] = es;
+  if (btn) { btn.textContent = '■ Stop'; btn.dataset.action = 'stoplogs'; }
+
+  es.onmessage = (e) => {
+    if (e.data === '[heartbeat]') return;
+    if (logEl) {
+      logEl.textContent += e.data + '\n';
+      const lines = logEl.textContent.split('\n');
+      if (lines.length > 300) logEl.textContent = lines.slice(-300).join('\n');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  };
+  es.onerror = () => {
+    if (logEl) logEl.textContent += '\n[Stream closed]\n';
+    stopLiveLog(stackName);
+  };
+}
+
+function stopLiveLog(stackName) {
+  if (_logStreams[stackName]) {
+    _logStreams[stackName].close();
+    delete _logStreams[stackName];
+  }
+  const btn = document.getElementById(`livebtn-${stackName}`);
+  if (btn) { btn.textContent = '⚡ Live'; btn.dataset.action = 'livelog'; }
+}
+
+// ── Resource history / sparklines ─────────────────────────────────────────────
+
+let _resourceHistory = [];
+
+async function loadResourceHistory() {
+  try {
+    _resourceHistory = await api('/api/resources/history');
+  } catch { _resourceHistory = []; }
+}
+
+function getSparklineValues(containerName, field = 'CPUPerc') {
+  return _resourceHistory.map(snap => {
+    const entry = (snap.data || []).find(r => (r.Name || '').replace(/^\//, '') === containerName.replace(/^\//, ''));
+    if (!entry) return 0;
+    return parseFloat((entry[field] || '0').replace('%', '')) || 0;
+  });
+}
+
+function drawSparkline(canvas, values, color = '#5c7cfa') {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  if (values.length < 2) return;
+  const max = Math.max(...values, 0.1);
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  values.forEach((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - (v / max) * (h - 2) - 1;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function renderSparklines() {
+  document.querySelectorAll('canvas[data-sparkline]').forEach(canvas => {
+    const name = canvas.dataset.sparkline;
+    const values = getSparklineValues(name);
+    drawSparkline(canvas, values);
+  });
+}
+
+// ── User management ───────────────────────────────────────────────────────────
+
+async function loadUsers() {
+  const list = document.getElementById('usersList');
+  const status = document.getElementById('userMgmtStatus');
+  const panel = document.getElementById('userMgmtPanel');
+  if (!list) return;
+  if (!state.user || state.user.role !== 'admin') {
+    if (panel) panel.classList.add('hidden');
+    return;
+  }
+  if (panel) panel.classList.remove('hidden');
+  try {
+    const users = await api('/api/users');
+    list.innerHTML = users.map(u => `
+      <div class="user-row">
+        <span class="user-row-name">${escapeHtml(u.username)}</span>
+        <select class="btn-xs" data-user-action="setrole" data-username="${escapeHtml(u.username)}">
+          <option value="admin"${u.role === 'admin' ? ' selected' : ''}>Admin</option>
+          <option value="user"${u.role === 'user' ? ' selected' : ''}>Viewer</option>
+        </select>
+        ${u.username !== state.user.username
+          ? `<button class="btn-xs btn-danger" data-user-action="delete" data-username="${escapeHtml(u.username)}">Remove</button>`
+          : '<span class="hint">(you)</span>'}
+      </div>`).join('');
+    if (status) status.textContent = `${users.length} user${users.length !== 1 ? 's' : ''}.`;
+  } catch (err) {
+    if (status) status.textContent = `Load failed: ${err.message}`;
+  }
+}
+
+async function createUser() {
+  const username = document.getElementById('newUserUsername').value.trim();
+  const password = document.getElementById('newUserPassword').value;
+  const role = document.getElementById('newUserRole').value;
+  const status = document.getElementById('userMgmtStatus');
+  if (!username || !password) { status.textContent = 'Fill in username and password.'; return; }
+  try {
+    await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    if (role === 'admin') {
+      await api(`/api/users/${encodeURIComponent(username)}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: 'admin' }),
+      });
+    }
+    document.getElementById('newUserUsername').value = '';
+    document.getElementById('newUserPassword').value = '';
+    toast(`User "${username}" created.`, 'success');
+    await loadUsers();
+  } catch (err) {
+    status.textContent = `Failed: ${err.message}`;
   }
 }
 
@@ -1145,7 +1372,8 @@ function wireNavigation() {
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       switchView(btn.dataset.view);
-      if (btn.dataset.view === 'settings') loadNotifSettings();
+      if (btn.dataset.view === 'settings') { loadNotifSettings(); loadUsers(); }
+      if (btn.dataset.view === 'images') loadImages();
     });
   });
   document.querySelectorAll('.auth-tab').forEach(btn => {
@@ -1197,6 +1425,41 @@ document.getElementById('notifSaveBtn').addEventListener('click', saveNotifSetti
 document.getElementById('notifTestBtn').addEventListener('click', testNotification);
 document.getElementById('backupDownloadBtn').addEventListener('click', downloadBackup);
 document.getElementById('restoreBtn').addEventListener('click', restoreBackup);
+document.getElementById('refreshImagesBtn').addEventListener('click', loadImages);
+document.getElementById('createUserBtn').addEventListener('click', createUser);
+
+document.getElementById('usersList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-user-action]');
+  if (!btn) return;
+  const action = btn.dataset.userAction;
+  const username = btn.dataset.username;
+  if (action === 'delete') {
+    if (!confirm(`Remove user "${username}"?`)) return;
+    try {
+      await api(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+      toast(`User "${username}" removed.`, 'success');
+      await loadUsers();
+    } catch (err) { toast(`Failed: ${err.message}`, 'error'); }
+  }
+});
+
+document.getElementById('usersList').addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-user-action="setrole"]');
+  if (!sel) return;
+  try {
+    await api(`/api/users/${encodeURIComponent(sel.dataset.username)}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role: sel.value }),
+    });
+    toast(`Role updated.`, 'success');
+  } catch (err) { toast(`Failed: ${err.message}`, 'error'); }
+});
+
+document.getElementById('imagesList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-img-action="delete"]');
+  if (!btn) return;
+  await deleteImage(btn.dataset.imgRef);
+});
 
 const hamburgerBtn = document.getElementById('hamburgerBtn');
 const sidebar = document.getElementById('sidebar');
@@ -1264,6 +1527,7 @@ document.getElementById('stackSearch').addEventListener('input', (e) => {
 
 document.getElementById('containerSearch').addEventListener('input', () => {
   renderSystemStatus();
+  renderSparklines();
 });
 
 setInterval(async () => {
@@ -1276,6 +1540,7 @@ setInterval(async () => {
     state.containers = containers;
     state.stacks = stacks;
     renderSystemStatus();
+    renderSparklines();
     renderStacks(document.getElementById('stackSearch')?.value || '');
   } catch { /* silent */ }
 }, 30000);
