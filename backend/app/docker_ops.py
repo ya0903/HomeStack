@@ -807,3 +807,91 @@ def _check_image_update(image: str) -> Dict:
 
 def get_stack_compose_dir(stack_name: str) -> Path:
     return _stack_root(stack_name)
+
+
+def get_stack_compose_content(stack_name: str) -> str:
+    path = _stack_compose_path(stack_name)
+    if not path.exists():
+        raise FileNotFoundError(f'Stack {stack_name!r} not found')
+    return path.read_text(encoding='utf-8')
+
+
+# ── Network management ─────────────────────────────────────────────────────────
+
+def list_networks() -> List[Dict]:
+    if not docker_available():
+        return []
+    result = _run_command(['docker', 'network', 'ls', '--format', '{{json .}}'])
+    if result.returncode != 0:
+        return []
+    networks = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            networks.append(json.loads(line))
+        except Exception:
+            continue
+    return networks
+
+
+def inspect_network(network_id: str) -> Dict:
+    result = _run_command(['docker', 'network', 'inspect', network_id])
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or 'Failed to inspect network')
+    try:
+        data = json.loads(result.stdout)
+        if data:
+            net = data[0]
+            containers = [
+                {'name': v.get('Name', ''), 'ipv4': v.get('IPv4Address', '')}
+                for v in (net.get('Containers') or {}).values()
+            ]
+            return {
+                'id': net.get('Id', '')[:12],
+                'name': net.get('Name', ''),
+                'driver': net.get('Driver', ''),
+                'scope': net.get('Scope', ''),
+                'subnet': ((net.get('IPAM') or {}).get('Config') or [{}])[0].get('Subnet', ''),
+                'containers': containers,
+            }
+    except Exception:
+        pass
+    return {}
+
+
+def create_network_resource(name: str, driver: str = 'bridge') -> Dict:
+    result = _run_command(['docker', 'network', 'create', '--driver', driver, name])
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or 'Failed to create network')
+    return {'ok': True, 'id': result.stdout.strip()}
+
+
+def delete_network_resource(network_id: str) -> Dict:
+    result = _run_command(['docker', 'network', 'rm', network_id])
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or 'Failed to delete network')
+    return {'ok': True}
+
+
+# ── Disk usage ─────────────────────────────────────────────────────────────────
+
+def get_disk_summary() -> Dict:
+    import re as _re
+    result = _run_command(['docker', 'system', 'df'])
+    if result.returncode != 0:
+        return {'categories': [], 'error': result.stderr}
+    lines = result.stdout.strip().splitlines()
+    categories = []
+    for line in lines[1:]:
+        parts = _re.split(r'\s{2,}', line.strip())
+        if len(parts) >= 4:
+            categories.append({
+                'type': parts[0],
+                'total': parts[1],
+                'active': parts[2],
+                'size': parts[3],
+                'reclaimable': parts[4] if len(parts) > 4 else '',
+            })
+    return {'categories': categories}

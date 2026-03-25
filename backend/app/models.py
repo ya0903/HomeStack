@@ -203,6 +203,19 @@ class PluginGitInstallRequest(BaseModel):
         return value
 
 
+class NetworkCreateRequest(BaseModel):
+    name: str
+    driver: str = 'bridge'
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('Network name cannot be empty')
+        return value
+
+
 class UserRoleRequest(BaseModel):
     role: str
 

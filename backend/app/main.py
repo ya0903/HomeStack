@@ -22,25 +22,31 @@ from .docker_ops import (
     check_stack_updates,
     compose_available,
     create_backup_archive,
+    create_network_resource,
     delete_health_config,
     delete_image,
+    delete_network_resource,
     delete_stack,
     deploy_raw_stack,
     deploy_stack,
     docker_available,
     get_container_resources,
+    get_disk_summary,
     get_stack,
     get_stack_category,
+    get_stack_compose_content,
     get_stack_compose_dir,
     get_stack_disk_usage,
     get_stack_logs,
     get_stack_runtime_status,
     import_container,
+    inspect_network,
     list_all_containers,
     list_categories,
     list_deployed_stacks,
     list_images,
     list_named_volumes,
+    list_networks,
     pull_and_redeploy,
     restore_backup_archive,
     run_health_check,
@@ -50,6 +56,7 @@ from .docker_ops import (
     update_stack,
 )
 from .models import (
+    NetworkCreateRequest,
     NotificationSettingsRequest,
     PluginGitInstallRequest,
     RawDeploymentRequest,
@@ -526,3 +533,51 @@ def remove_user(username: str, user=Depends(require_admin)) -> dict:
         return {'ok': True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ── Stack compose content ──────────────────────────────────────────────────────
+
+@app.get('/api/stacks/{stack_name}/compose')
+def stack_compose_content(stack_name: str, user=Depends(get_current_user)) -> dict:
+    try:
+        return {'stack_name': stack_name, 'content': get_stack_compose_content(stack_name)}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ── Network management ─────────────────────────────────────────────────────────
+
+@app.get('/api/networks')
+def networks_list(user=Depends(get_current_user)) -> list:
+    return list_networks()
+
+
+@app.get('/api/networks/{network_id}')
+def network_detail(network_id: str, user=Depends(get_current_user)) -> dict:
+    try:
+        return inspect_network(network_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post('/api/networks')
+def create_network(request: NetworkCreateRequest, user=Depends(require_admin)) -> dict:
+    try:
+        return create_network_resource(request.name, request.driver)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.delete('/api/networks/{network_id}')
+def remove_network(network_id: str, user=Depends(require_admin)) -> dict:
+    try:
+        return delete_network_resource(network_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ── Disk usage ─────────────────────────────────────────────────────────────────
+
+@app.get('/api/disk')
+def disk_usage(user=Depends(get_current_user)) -> dict:
+    return get_disk_summary()
