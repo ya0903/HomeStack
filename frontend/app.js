@@ -766,23 +766,78 @@ const MARKETPLACE = [
     compose: `services:\n  whoami:\n    image: traefik/whoami:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "9999:80"` },
 ];
 
+let _customMarketplace = [];
+
+async function loadCustomMarketplace() {
+  try {
+    _customMarketplace = await api('/api/marketplace');
+  } catch { _customMarketplace = []; }
+}
+
 function renderMarketplace(filter = '') {
   const grid = document.getElementById('marketplaceGrid');
   if (!grid) return;
+  const all = [
+    ..._customMarketplace.map(t => ({ ...t, _custom: true })),
+    ...MARKETPLACE,
+  ];
   const term = filter.toLowerCase();
   const items = term
-    ? MARKETPLACE.filter(t => t.name.toLowerCase().includes(term) || t.category.toLowerCase().includes(term) || t.description.toLowerCase().includes(term))
-    : MARKETPLACE;
+    ? all.filter(t => t.name.toLowerCase().includes(term) || (t.category || '').toLowerCase().includes(term) || (t.description || '').toLowerCase().includes(term))
+    : all;
   grid.innerHTML = items.map(t => `
     <div class="marketplace-card">
-      <div class="marketplace-icon">${t.icon}</div>
+      <div class="marketplace-icon">${t.icon || '📦'}</div>
       <div class="marketplace-info">
         <strong>${escapeHtml(t.name)}</strong>
-        <span class="badge badge-muted" style="font-size:0.65rem">${escapeHtml(t.category)}</span>
-        <p class="plugin-desc">${escapeHtml(t.description)}</p>
+        <span class="badge badge-muted" style="font-size:0.65rem">${escapeHtml(t.category || '')}</span>
+        ${t._custom ? '<span class="badge badge-accent" style="font-size:0.65rem">Custom</span>' : ''}
+        <p class="plugin-desc">${escapeHtml(t.description || '')}</p>
       </div>
-      <button class="btn-sm primary" data-mkt-id="${escapeHtml(t.id)}">Deploy</button>
+      <div style="display:flex;flex-direction:column;gap:0.3rem;align-items:flex-end;flex-shrink:0">
+        <button class="btn-sm primary" data-mkt-id="${escapeHtml(t.id)}">Deploy</button>
+        ${t._custom && state.user?.role === 'admin' ? `<button class="btn-xs btn-danger" data-mkt-delete="${escapeHtml(t.id)}">Remove</button>` : ''}
+      </div>
     </div>`).join('');
+}
+
+async function submitMarketplaceTemplate() {
+  const status = document.getElementById('mktStatus');
+  const payload = {
+    name: document.getElementById('mktName').value.trim(),
+    category: document.getElementById('mktCategory').value.trim() || 'Custom',
+    icon: document.getElementById('mktIcon').value.trim() || '📦',
+    description: document.getElementById('mktDescription').value.trim(),
+    compose: document.getElementById('mktCompose').value.trim(),
+  };
+  if (!payload.name || !payload.compose) { status.textContent = 'Name and Compose are required.'; return; }
+  try {
+    await api('/api/marketplace', { method: 'POST', body: JSON.stringify(payload) });
+    toast(`"${payload.name}" added to marketplace.`, 'success');
+    status.textContent = 'Saved!';
+    document.getElementById('mktName').value = '';
+    document.getElementById('mktCategory').value = '';
+    document.getElementById('mktIcon').value = '';
+    document.getElementById('mktDescription').value = '';
+    document.getElementById('mktCompose').value = '';
+    document.getElementById('mktUploadForm').classList.add('hidden');
+    await loadCustomMarketplace();
+    renderMarketplace(document.getElementById('marketplaceSearch')?.value || '');
+  } catch (err) {
+    status.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function deleteMarketplaceTemplate(id) {
+  if (!confirm(`Remove "${id}" from marketplace?`)) return;
+  try {
+    await api(`/api/marketplace/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    toast('Template removed.', 'success');
+    await loadCustomMarketplace();
+    renderMarketplace(document.getElementById('marketplaceSearch')?.value || '');
+  } catch (err) {
+    toast(`Failed: ${err.message}`, 'error');
+  }
 }
 
 function deployMarketplaceTemplate(id) {
@@ -1587,7 +1642,7 @@ function wireNavigation() {
       if (btn.dataset.view === 'settings') { loadNotifSettings(); loadUsers(); }
       if (btn.dataset.view === 'images') loadImages();
       if (btn.dataset.view === 'networks') loadNetworks();
-      if (btn.dataset.view === 'templates') renderMarketplace();
+      if (btn.dataset.view === 'templates') { loadCustomMarketplace().then(() => renderMarketplace()); }
       if (btn.dataset.view === 'system') loadDiskUsage();
     });
   });
@@ -1662,6 +1717,19 @@ document.getElementById('marketplaceGrid').addEventListener('click', (e) => {
 document.getElementById('marketplaceSearch').addEventListener('input', (e) => {
   renderMarketplace(e.target.value);
 });
+
+document.getElementById('toggleMktUpload').addEventListener('click', () => {
+  const form = document.getElementById('mktUploadForm');
+  form.classList.toggle('hidden');
+  document.getElementById('mktStatus').textContent = '';
+});
+
+document.getElementById('mktCancelBtn').addEventListener('click', () => {
+  document.getElementById('mktUploadForm').classList.add('hidden');
+  document.getElementById('mktStatus').textContent = '';
+});
+
+document.getElementById('mktSubmitBtn').addEventListener('click', submitMarketplaceTemplate);
 
 document.getElementById('usersList').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-user-action]');
