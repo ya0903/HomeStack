@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="docs/screenshots/banner.png" alt="HomeStack Banner" width="100%" />
 
 # HomeStack
 
