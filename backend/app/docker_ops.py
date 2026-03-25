@@ -523,7 +523,7 @@ def run_stack_action(stack_name: str, action: str) -> Dict[str, object]:
     if not compose_available():
         raise RuntimeError('Docker Compose not available')
     command_map = {
-        'start': ['up', '-d'],
+        'start': ['up', '-d', '--no-recreate'],
         'stop': ['stop'],
         'restart': ['restart'],
     }
