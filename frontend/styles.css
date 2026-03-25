@@ -538,6 +538,58 @@ pre {
   border: 1px solid var(--border);
 }
 
+/* ── Marketplace ────────────────────────────── */
+.marketplace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+.marketplace-card {
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.85rem 0.9rem;
+  transition: border-color var(--t), box-shadow var(--t);
+}
+.marketplace-card:hover { border-color: var(--border-hi); box-shadow: var(--shadow-sm); }
+.marketplace-icon { font-size: 1.6rem; flex-shrink: 0; line-height: 1; }
+.marketplace-info { flex: 1; min-width: 0; }
+.marketplace-info strong { display: block; font-size: 0.88rem; margin-bottom: 0.2rem; }
+
+/* ── Network cards ──────────────────────────── */
+.network-card {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.75rem; padding: 0.6rem 0.75rem;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); margin-bottom: 0.4rem;
+  flex-wrap: wrap;
+}
+.network-card-info { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; flex: 1; }
+.network-card-info strong { font-size: 0.88rem; }
+.network-detail {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-top: none; border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  margin-bottom: 0.4rem; font-size: 0.78rem;
+}
+
+/* ── Disk dashboard ─────────────────────────── */
+.disk-row {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.4rem 0; border-bottom: 1px solid var(--border);
+  flex-wrap: wrap; font-size: 0.82rem;
+}
+.disk-row:last-child { border-bottom: none; }
+.disk-type { font-weight: 700; min-width: 120px; }
+.disk-size { font-weight: 700; color: var(--accent); min-width: 70px; }
+.disk-meta { color: var(--text-2); font-size: 0.78rem; }
+
+/* ── Sidebar badge ──────────────────────────── */
+.sidebar-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.08em 0.45em; border-radius: 99px;
+  font-size: 0.68rem; font-weight: 700; margin-left: 0.3rem;
+}
+
 /* ── User management rows ───────────────────── */
 .user-row {
   display: flex; align-items: center; gap: 0.5rem;

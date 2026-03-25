@@ -486,6 +486,7 @@ function renderStacks(filter = '') {
           <button class="btn-sm btn-success" data-action="start" data-stack-name="${name}">▶ Start</button>
           <button class="btn-sm btn-warning" data-action="stop" data-stack-name="${name}">⏹ Stop</button>
           <button class="btn-sm" data-action="restart" data-stack-name="${name}">↺ Restart</button>
+          <button class="btn-sm btn-ghost" data-action="copycompose" data-stack-name="${name}">📋 Copy</button>
           <button class="btn-sm btn-accent" data-action="update" data-stack-name="${name}">⬆ Pull</button>
           <button class="btn-sm btn-ghost" data-action="checkupdate" data-stack-name="${name}">🔍 Updates</button>
           <button class="btn-sm btn-ghost" data-action="fetchlogs" data-stack-name="${name}">📋 Logs</button>
@@ -517,6 +518,7 @@ async function refreshStacks() {
   state.schedules = schedules;
   state.categories = categories;
   renderStacks(document.getElementById('stackSearch')?.value || '');
+  updateSidebarBadges();
 }
 
 els.stacksList.addEventListener('click', async (e) => {
@@ -537,6 +539,9 @@ els.stacksList.addEventListener('click', async (e) => {
   else if (action === 'fetchlogs') await viewLogs(stackName);
   else if (action === 'livelog') startLiveLog(stackName);
   else if (action === 'stoplogs') stopLiveLog(stackName);
+  else if (action === 'copycompose') await copyCompose(stackName);
+  else if (action === 'stop') { if (confirm(`Stop "${stackName}"?`)) await stackAction(stackName, 'stop'); }
+  else if (action === 'restart') { if (confirm(`Restart "${stackName}"?`)) await stackAction(stackName, 'restart'); }
   else await stackAction(stackName, action);
 });
 
@@ -714,6 +719,86 @@ async function saveEdit() {
   }
 }
 
+// ── Marketplace data ──────────────────────────────────────────────────────────
+
+const MARKETPLACE = [
+  { id: 'jellyfin', name: 'Jellyfin', category: 'Media', icon: '🎬',
+    description: 'Free open-source media server. Stream movies, music, TV shows.',
+    compose: `services:\n  jellyfin:\n    image: jellyfin/jellyfin:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "8096:8096"\n    volumes:\n      - /opt/homelab/jellyfin/config:/config\n      - /opt/homelab/jellyfin/cache:/cache\n      - /media:/media:ro` },
+  { id: 'plex', name: 'Plex', category: 'Media', icon: '🎞',
+    description: 'Media server with rich clients on every platform.',
+    compose: `services:\n  plex:\n    image: plexinc/pms-docker:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    network_mode: host\n    environment:\n      - TZ=UTC\n    volumes:\n      - /opt/homelab/plex/config:/config\n      - /media:/media:ro` },
+  { id: 'nextcloud', name: 'Nextcloud', category: 'Productivity', icon: '☁️',
+    description: 'Self-hosted file sync, share and collaboration platform.',
+    compose: `services:\n  nextcloud:\n    image: nextcloud:stable\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "8080:80"\n    volumes:\n      - /opt/homelab/nextcloud:/var/www/html\n    environment:\n      - NEXTCLOUD_ADMIN_USER=admin\n      - NEXTCLOUD_ADMIN_PASSWORD=changeme123` },
+  { id: 'vaultwarden', name: 'Vaultwarden', category: 'Security', icon: '🔐',
+    description: 'Lightweight Bitwarden-compatible password manager server.',
+    compose: `services:\n  vaultwarden:\n    image: vaultwarden/server:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "8083:80"\n    volumes:\n      - /opt/homelab/vaultwarden:/data` },
+  { id: 'nginx-proxy-manager', name: 'Nginx Proxy Manager', category: 'Networking', icon: '🔀',
+    description: 'Easy reverse proxy with SSL, web UI, and Let\'s Encrypt.',
+    compose: `services:\n  nginx-proxy-manager:\n    image: jc21/nginx-proxy-manager:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "80:80"\n      - "443:443"\n      - "81:81"\n    volumes:\n      - /opt/homelab/npm/data:/data\n      - /opt/homelab/npm/letsencrypt:/etc/letsencrypt` },
+  { id: 'uptime-kuma', name: 'Uptime Kuma', category: 'Monitoring', icon: '📊',
+    description: 'Self-hosted uptime monitoring tool with status pages.',
+    compose: `services:\n  uptime-kuma:\n    image: louislam/uptime-kuma:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "3001:3001"\n    volumes:\n      - /opt/homelab/uptime-kuma:/app/data` },
+  { id: 'gitea', name: 'Gitea', category: 'Development', icon: '🐙',
+    description: 'Lightweight self-hosted Git service.',
+    compose: `services:\n  gitea:\n    image: gitea/gitea:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "3000:3000"\n      - "222:22"\n    volumes:\n      - /opt/homelab/gitea:/data` },
+  { id: 'grafana', name: 'Grafana', category: 'Monitoring', icon: '📈',
+    description: 'Analytics and monitoring dashboards.',
+    compose: `services:\n  grafana:\n    image: grafana/grafana:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "3000:3000"\n    volumes:\n      - /opt/homelab/grafana:/var/lib/grafana` },
+  { id: 'pihole', name: 'Pi-hole', category: 'Networking', icon: '🛡',
+    description: 'Network-wide DNS ad blocker.',
+    compose: `services:\n  pihole:\n    image: pihole/pihole:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "53:53/tcp"\n      - "53:53/udp"\n      - "8082:80"\n    volumes:\n      - /opt/homelab/pihole/data:/etc/pihole\n      - /opt/homelab/pihole/dnsmasq:/etc/dnsmasq.d\n    environment:\n      - WEBPASSWORD=changeme123` },
+  { id: 'immich', name: 'Immich', category: 'Media', icon: '📷',
+    description: 'High-performance self-hosted photo and video backup.',
+    compose: `services:\n  immich-server:\n    image: ghcr.io/immich-app/immich-server:release\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "2283:2283"\n    volumes:\n      - /opt/homelab/immich/upload:/usr/src/app/upload\n    environment:\n      - DB_HOSTNAME=database\n      - DB_USERNAME=postgres\n      - DB_PASSWORD=changeme\n      - DB_DATABASE_NAME=immich` },
+  { id: 'portainer', name: 'Portainer CE', category: 'Management', icon: '🐳',
+    description: 'Container management UI — runs alongside HomeStack.',
+    compose: `services:\n  portainer:\n    image: portainer/portainer-ce:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "9000:9000"\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - /opt/homelab/portainer:/data` },
+  { id: 'homer', name: 'Homer', category: 'Dashboard', icon: '🏠',
+    description: 'A dead simple static homelab dashboard.',
+    compose: `services:\n  homer:\n    image: b4bz/homer:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "8085:8080"\n    volumes:\n      - /opt/homelab/homer:/www/assets` },
+  { id: 'paperless', name: 'Paperless-ngx', category: 'Productivity', icon: '📄',
+    description: 'Document management system — scan, index, and archive.',
+    compose: `services:\n  paperless:\n    image: ghcr.io/paperless-ngx/paperless-ngx:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "8010:8000"\n    volumes:\n      - /opt/homelab/paperless/data:/usr/src/paperless/data\n      - /opt/homelab/paperless/media:/usr/src/paperless/media\n      - /opt/homelab/paperless/export:/usr/src/paperless/export\n      - /opt/homelab/paperless/consume:/usr/src/paperless/consume` },
+  { id: 'whoami', name: 'Whoami', category: 'Testing', icon: '🔍',
+    description: 'Tiny HTTP service that prints request info. Great for testing.',
+    compose: `services:\n  whoami:\n    image: traefik/whoami:latest\n    container_name: {{STACK_NAME}}\n    restart: unless-stopped\n    ports:\n      - "9999:80"` },
+];
+
+function renderMarketplace(filter = '') {
+  const grid = document.getElementById('marketplaceGrid');
+  if (!grid) return;
+  const term = filter.toLowerCase();
+  const items = term
+    ? MARKETPLACE.filter(t => t.name.toLowerCase().includes(term) || t.category.toLowerCase().includes(term) || t.description.toLowerCase().includes(term))
+    : MARKETPLACE;
+  grid.innerHTML = items.map(t => `
+    <div class="marketplace-card">
+      <div class="marketplace-icon">${t.icon}</div>
+      <div class="marketplace-info">
+        <strong>${escapeHtml(t.name)}</strong>
+        <span class="badge badge-muted" style="font-size:0.65rem">${escapeHtml(t.category)}</span>
+        <p class="plugin-desc">${escapeHtml(t.description)}</p>
+      </div>
+      <button class="btn-sm primary" data-mkt-id="${escapeHtml(t.id)}">Deploy</button>
+    </div>`).join('');
+}
+
+function deployMarketplaceTemplate(id) {
+  const tpl = MARKETPLACE.find(t => t.id === id);
+  if (!tpl) return;
+  // Switch to deploy view with custom compose pre-filled
+  document.querySelector('.nav-btn[data-view="deploy"]')?.click();
+  els.templateSelect.value = '__custom__';
+  applyTemplateDefaults();
+  els.stackName.value = tpl.id;
+  els.installPath.value = `/opt/homelab/${tpl.id}`;
+  document.getElementById('customCompose').value = tpl.compose;
+  document.getElementById('customComposeField').classList.remove('hidden');
+  els.statusBox.textContent = `Loaded "${tpl.name}" template — review settings and click Deploy.`;
+}
+
 // ── Image manager ─────────────────────────────────────────────────────────────
 
 async function loadImages() {
@@ -753,6 +838,133 @@ async function deleteImage(ref) {
   } catch (err) {
     toast(`Delete failed: ${err.message}`, 'error');
   }
+}
+
+// ── Network manager ───────────────────────────────────────────────────────────
+
+async function loadNetworks() {
+  const list = document.getElementById('networksList');
+  if (!list) return;
+  list.innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const networks = await api('/api/networks');
+    if (!networks.length) { list.innerHTML = '<p class="hint">No networks found.</p>'; return; }
+    list.innerHTML = networks.map(n => `
+      <div class="network-card">
+        <div class="network-card-info">
+          <strong>${escapeHtml(n.Name || n.ID || '')}</strong>
+          <span class="badge badge-muted">${escapeHtml(n.Driver || '')}</span>
+          <span class="badge badge-muted">${escapeHtml(n.Scope || '')}</span>
+          <span class="hint" style="font-size:0.72rem">${escapeHtml(n.ID ? n.ID.slice(0,12) : '')}</span>
+        </div>
+        <div style="display:flex;gap:0.4rem;align-items:center">
+          <button class="btn-xs btn-accent" data-net-action="inspect" data-net-id="${escapeHtml(n.ID || n.Name || '')}">Details</button>
+          ${!['bridge','host','none'].includes(n.Name) ? `<button class="btn-xs btn-danger" data-net-action="delete" data-net-id="${escapeHtml(n.ID || n.Name || '')}">Remove</button>` : ''}
+        </div>
+      </div>
+      <div id="netdetail-${escapeHtml(n.ID ? n.ID.slice(0,12) : n.Name)}" class="network-detail hidden"></div>`).join('');
+  } catch (err) {
+    list.innerHTML = `<p class="hint">Error: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function createNetwork() {
+  const name = document.getElementById('newNetworkName').value.trim();
+  const driver = document.getElementById('newNetworkDriver').value;
+  const status = document.getElementById('networkStatus');
+  if (!name) { status.textContent = 'Enter a network name.'; return; }
+  try {
+    await api('/api/networks', { method: 'POST', body: JSON.stringify({ name, driver }) });
+    toast(`Network "${name}" created.`, 'success');
+    status.textContent = `Created network "${name}".`;
+    document.getElementById('newNetworkName').value = '';
+    await loadNetworks();
+  } catch (err) {
+    status.textContent = `Failed: ${err.message}`;
+    toast(`Failed: ${err.message}`, 'error');
+  }
+}
+
+async function deleteNetwork(networkId) {
+  if (!confirm(`Remove network "${networkId}"? Containers using it must be disconnected first.`)) return;
+  try {
+    await api(`/api/networks/${encodeURIComponent(networkId)}`, { method: 'DELETE' });
+    toast('Network removed.', 'success');
+    await loadNetworks();
+  } catch (err) {
+    toast(`Failed: ${err.message}`, 'error');
+  }
+}
+
+async function inspectNetwork(networkId) {
+  const shortId = networkId.slice(0, 12);
+  const detailEl = document.getElementById(`netdetail-${shortId}`);
+  if (!detailEl) return;
+  if (!detailEl.classList.contains('hidden')) { detailEl.classList.add('hidden'); return; }
+  try {
+    const data = await api(`/api/networks/${encodeURIComponent(networkId)}`);
+    const containers = (data.containers || []);
+    detailEl.innerHTML = `
+      <div style="font-size:0.78rem;padding:0.5rem 0.75rem;color:var(--text-2)">
+        <strong>Subnet:</strong> ${escapeHtml(data.subnet || '—')} &nbsp;
+        <strong>Containers:</strong> ${containers.length ? containers.map(c => `${escapeHtml(c.name)} (${escapeHtml(c.ipv4)})`).join(', ') : 'none'}
+      </div>`;
+    detailEl.classList.remove('hidden');
+  } catch (err) {
+    detailEl.textContent = `Error: ${err.message}`;
+    detailEl.classList.remove('hidden');
+  }
+}
+
+// ── Disk dashboard ────────────────────────────────────────────────────────────
+
+async function loadDiskUsage() {
+  const el = document.getElementById('diskDashboard');
+  if (!el) return;
+  el.classList.remove('hidden');
+  el.innerHTML = '<p class="hint">Loading disk info…</p>';
+  try {
+    const data = await api('/api/disk');
+    const cats = data.categories || [];
+    if (!cats.length) { el.innerHTML = '<p class="hint">No disk data available.</p>'; return; }
+    el.innerHTML = `
+      <div class="subpanel" style="margin-bottom:0.75rem">
+        <div class="panel-header compact"><h3>💾 Disk usage</h3></div>
+        ${cats.map(c => `
+          <div class="disk-row">
+            <span class="disk-type">${escapeHtml(c.type)}</span>
+            <span class="disk-size">${escapeHtml(c.size)}</span>
+            <span class="disk-meta">${escapeHtml(c.total)} total · ${escapeHtml(c.active)} active · <span style="color:var(--warning)">${escapeHtml(c.reclaimable)}</span> reclaimable</span>
+          </div>`).join('')}
+      </div>`;
+  } catch (err) {
+    el.innerHTML = `<p class="hint">Error: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+// ── Copy compose ──────────────────────────────────────────────────────────────
+
+async function copyCompose(stackName) {
+  try {
+    const data = await api(`/api/stacks/${encodeURIComponent(stackName)}/compose`);
+    await navigator.clipboard.writeText(data.content);
+    toast('Compose YAML copied to clipboard.', 'success');
+  } catch (err) {
+    toast(`Copy failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Sidebar badges ────────────────────────────────────────────────────────────
+
+function updateSidebarBadges() {
+  const badge = document.getElementById('stacksBadge');
+  if (!badge) return;
+  const total = state.stacks.length;
+  const running = state.stacks.filter(s => s.runtime?.running).length;
+  if (!total) { badge.classList.add('hidden'); return; }
+  badge.classList.remove('hidden');
+  badge.textContent = `${running}/${total}`;
+  badge.className = `sidebar-badge ${running === total ? 'badge-success' : running > 0 ? 'badge-warning' : 'badge-danger'}`;
 }
 
 // ── Update checks ─────────────────────────────────────────────────────────────
@@ -1374,6 +1586,9 @@ function wireNavigation() {
       switchView(btn.dataset.view);
       if (btn.dataset.view === 'settings') { loadNotifSettings(); loadUsers(); }
       if (btn.dataset.view === 'images') loadImages();
+      if (btn.dataset.view === 'networks') loadNetworks();
+      if (btn.dataset.view === 'templates') renderMarketplace();
+      if (btn.dataset.view === 'system') loadDiskUsage();
     });
   });
   document.querySelectorAll('.auth-tab').forEach(btn => {
@@ -1426,7 +1641,27 @@ document.getElementById('notifTestBtn').addEventListener('click', testNotificati
 document.getElementById('backupDownloadBtn').addEventListener('click', downloadBackup);
 document.getElementById('restoreBtn').addEventListener('click', restoreBackup);
 document.getElementById('refreshImagesBtn').addEventListener('click', loadImages);
+document.getElementById('refreshNetworksBtn').addEventListener('click', loadNetworks);
+document.getElementById('createNetworkBtn').addEventListener('click', createNetwork);
+document.getElementById('refreshDiskBtn').addEventListener('click', loadDiskUsage);
 document.getElementById('createUserBtn').addEventListener('click', createUser);
+
+document.getElementById('networksList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-net-action]');
+  if (!btn) return;
+  if (btn.dataset.netAction === 'delete') await deleteNetwork(btn.dataset.netId);
+  else if (btn.dataset.netAction === 'inspect') await inspectNetwork(btn.dataset.netId);
+});
+
+document.getElementById('marketplaceGrid').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-mkt-id]');
+  if (!btn) return;
+  deployMarketplaceTemplate(btn.dataset.mktId);
+});
+
+document.getElementById('marketplaceSearch').addEventListener('input', (e) => {
+  renderMarketplace(e.target.value);
+});
 
 document.getElementById('usersList').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-user-action]');

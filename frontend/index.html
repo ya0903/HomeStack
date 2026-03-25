@@ -74,13 +74,16 @@
         <span class="nav-icon">🚀</span> Deploy
       </button>
       <button class="nav-btn" data-view="stacks">
-        <span class="nav-icon">📦</span> Stacks
+        <span class="nav-icon">📦</span> Stacks <span id="stacksBadge" class="sidebar-badge hidden"></span>
       </button>
       <button class="nav-btn" data-view="templates">
         <span class="nav-icon">🧩</span> Templates
       </button>
       <button class="nav-btn" data-view="system">
         <span class="nav-icon">⚙️</span> System
+      </button>
+      <button class="nav-btn" data-view="networks">
+        <span class="nav-icon">🌐</span> Networks
       </button>
       <button class="nav-btn" data-view="images">
         <span class="nav-icon">🖼</span> Images
@@ -178,8 +181,20 @@
     <!-- Template builder -->
     <section class="panel hidden" id="view-templates">
       <div class="panel-header">
-        <h2>🧩 Template builder</h2>
+        <h2>🧩 Templates</h2>
       </div>
+
+      <div class="subpanel" style="margin-bottom:1.2rem">
+        <div class="panel-header compact">
+          <h3>Marketplace</h3>
+          <input id="marketplaceSearch" type="search" placeholder="Search apps…"
+            style="padding:0.35em 0.7em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.82rem;outline:none;width:160px" />
+        </div>
+        <div id="marketplaceGrid" class="marketplace-grid"></div>
+      </div>
+
+      <div class="subpanel">
+        <div class="panel-header compact"><h3>Custom template builder</h3></div>
       <div class="form-grid" style="margin-bottom:0.75rem">
         <label>Template ID
           <input id="builderId" type="text" placeholder="nextcloud-custom" />
@@ -206,15 +221,20 @@
         <button id="builderSave" class="primary">💾 Save template</button>
       </div>
       <pre id="builderStatus">Create reusable deployment templates.</pre>
+      </div><!-- end custom builder subpanel -->
     </section>
 
     <!-- System -->
     <section class="panel hidden" id="view-system">
       <div class="panel-header">
         <h2>⚙️ System status</h2>
-        <input id="containerSearch" type="search" placeholder="Search containers…"
-          style="padding:0.42em 0.75em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.84rem;outline:none;width:200px" />
+        <div class="button-row">
+          <input id="containerSearch" type="search" placeholder="Search containers…"
+            style="padding:0.42em 0.75em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.84rem;outline:none;width:200px" />
+          <button id="refreshDiskBtn">💾 Disk usage</button>
+        </div>
       </div>
+      <div id="diskDashboard" class="hidden" style="margin-bottom:1.2rem"></div>
       <div id="systemStatus"></div>
     </section>
 
@@ -325,6 +345,33 @@
         </div>
         <pre id="backupStatus" style="margin-top:0.75rem">Ready.</pre>
       </div>
+    </section>
+
+    <!-- Networks -->
+    <section class="panel hidden" id="view-networks">
+      <div class="panel-header">
+        <h2>🌐 Networks</h2>
+        <button id="refreshNetworksBtn">Refresh</button>
+      </div>
+      <div class="subpanel" style="margin-bottom:1rem">
+        <div class="panel-header compact"><h3>Create network</h3></div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-end">
+          <label style="margin:0;flex:1;min-width:140px">Name
+            <input id="newNetworkName" type="text" placeholder="my-network" />
+          </label>
+          <label style="margin:0;width:130px">Driver
+            <select id="newNetworkDriver">
+              <option value="bridge">bridge</option>
+              <option value="host">host</option>
+              <option value="overlay">overlay</option>
+              <option value="macvlan">macvlan</option>
+            </select>
+          </label>
+          <button id="createNetworkBtn" class="primary btn-sm" style="align-self:flex-end;margin-bottom:0.75rem">Create</button>
+        </div>
+        <pre id="networkStatus">Ready.</pre>
+      </div>
+      <div id="networksList"><p class="hint">Loading networks…</p></div>
     </section>
 
     <!-- Images -->
