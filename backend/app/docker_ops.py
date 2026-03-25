@@ -385,7 +385,40 @@ def get_stack_runtime_status(stack_name: str) -> Dict[str, object]:
             'summary': result.stderr.strip() or result.stdout.strip() or 'Unable to fetch status',
         }
     containers = parse_compose_ps_output(result.stdout)
-    running = any(str(container.get('State', '')).lower() == 'running' for container in containers)
+
+    # For imported stacks, compose ps returns nothing because the container
+    # wasn't started with this compose project. Fall back to docker ps by name.
+    if not containers:
+        meta_path = _stack_meta_path(stack_name)
+        is_imported = False
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding='utf-8'))
+                is_imported = meta.get('template_id') == '__imported__'
+            except Exception:
+                pass
+        if is_imported:
+            fallback = _run_command([
+                'docker', 'ps', '-a',
+                '--filter', f'name=^/{stack_name}$',
+                '--format', '{{json .}}',
+            ])
+            for line in fallback.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    c = json.loads(line)
+                    containers.append({
+                        'Name': c.get('Names', stack_name),
+                        'Service': stack_name,
+                        'State': c.get('State', 'unknown'),
+                        'Status': c.get('Status', ''),
+                    })
+                except Exception:
+                    continue
+
+    running = any(str(c.get('State', '')).lower() == 'running' for c in containers)
     summary = 'Running' if running else 'Stopped'
     if not containers:
         summary = 'No containers yet'
