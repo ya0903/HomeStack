@@ -26,11 +26,11 @@ Built for homelabbers who want a clean, modern interface to deploy, monitor, upd
 
 | Deploy | Stacks |
 |--------|--------|
-| <img src="screenshots/deploy.png" width="420" /> | <img src="screenshots/stacks.png" width="420" /> |
+| <img src="docs/screenshots/deploy.png" width="420" /> | <img src="docs/screenshots/stacks.png" width="420" /> |
 
 | System Status | Plugins |
 |--------------|-----------|
-| <img src="screenshots/system.png" width="420" /> | <img src="screenshots/plugins.png" width="420" /> |
+| <img src="docs/screenshots/system.png" width="420" /> | <img src="docs/screenshots/plugins.png" width="420" /> |
 
 </div>
 
