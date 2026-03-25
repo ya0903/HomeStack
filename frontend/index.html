@@ -187,10 +187,37 @@
       <div class="subpanel" style="margin-bottom:1.2rem">
         <div class="panel-header compact">
           <h3>Marketplace</h3>
-          <input id="marketplaceSearch" type="search" placeholder="Search apps…"
-            style="padding:0.35em 0.7em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.82rem;outline:none;width:160px" />
+          <div style="display:flex;gap:0.5rem;align-items:center">
+            <input id="marketplaceSearch" type="search" placeholder="Search apps…"
+              style="padding:0.35em 0.7em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.82rem;outline:none;width:160px" />
+            <button id="toggleMktUpload" class="btn-sm btn-accent">+ Submit</button>
+          </div>
         </div>
         <div id="marketplaceGrid" class="marketplace-grid"></div>
+        <div id="mktUploadForm" class="hidden" style="margin-top:0.75rem;border-top:1px solid var(--border);padding-top:0.75rem">
+          <div class="form-grid" style="margin-bottom:0.6rem">
+            <label>Template name
+              <input id="mktName" type="text" placeholder="My App" />
+            </label>
+            <label>Category
+              <input id="mktCategory" type="text" placeholder="Media, Tools, etc." />
+            </label>
+            <label>Icon (emoji)
+              <input id="mktIcon" type="text" placeholder="📦" maxlength="4" style="width:80px" />
+            </label>
+            <label>Description
+              <input id="mktDescription" type="text" placeholder="What does it do?" />
+            </label>
+          </div>
+          <label>Docker Compose YAML
+            <textarea id="mktCompose" rows="10" spellcheck="false" placeholder="services:&#10;  app:&#10;    image: example/app:latest&#10;    container_name: {{STACK_NAME}}&#10;    restart: unless-stopped&#10;    ports:&#10;      - &quot;8080:80&quot;"></textarea>
+          </label>
+          <div class="button-row" style="margin-top:0.5rem">
+            <button id="mktSubmitBtn" class="primary btn-sm">Save to marketplace</button>
+            <button id="mktCancelBtn" class="btn-sm">Cancel</button>
+          </div>
+          <pre id="mktStatus" style="margin-top:0.5rem"></pre>
+        </div>
       </div>
 
       <div class="subpanel">
