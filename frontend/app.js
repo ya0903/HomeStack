@@ -44,11 +44,27 @@ const state = {
   stacks: [],
   plugins: [],
   health: null,
+  resources: [],
+  schedules: {},
+  categories: [],
+  pinnedStacks: new Set(JSON.parse(localStorage.getItem('hs-pinned') || '[]')),
+  activeCategoryFilter: '',
   authConfig: { mode: 'local', login_url: '/', local_auth_enabled: true },
   token: localStorage.getItem('homeStackToken') || '',
   user: JSON.parse(localStorage.getItem('homeStackUser') || 'null'),
   editingStack: null,
 };
+
+function savePinned() {
+  localStorage.setItem('hs-pinned', JSON.stringify([...state.pinnedStacks]));
+}
+
+function togglePin(stackName) {
+  if (state.pinnedStacks.has(stackName)) state.pinnedStacks.delete(stackName);
+  else state.pinnedStacks.add(stackName);
+  savePinned();
+  renderStacks(document.getElementById('stackSearch')?.value || '');
+}
 
 // ── Plugin registry ───────────────────────────────────────────────────────────
 const pluginRegistry = {
@@ -367,11 +383,32 @@ function extractStackPorts(containers) {
   return ports;
 }
 
+function renderCategoryTabs() {
+  const tabs = document.getElementById('categoryTabs');
+  if (!tabs) return;
+  const all = ['', ...state.categories];
+  tabs.innerHTML = all.map(cat => {
+    const active = state.activeCategoryFilter === cat;
+    return `<button class="cat-tab${active ? ' active' : ''}" data-cat="${escapeHtml(cat)}">${cat || 'All'}</button>`;
+  }).join('');
+}
+
 function renderStacks(filter = '') {
+  renderCategoryTabs();
   const term = filter.toLowerCase();
-  const filtered = term
+  let filtered = term
     ? state.stacks.filter(s => s.stack_name.toLowerCase().includes(term) || (s.template_id || '').toLowerCase().includes(term))
     : state.stacks;
+
+  if (state.activeCategoryFilter) {
+    filtered = filtered.filter(s => (s.category || '') === state.activeCategoryFilter);
+  }
+
+  // Pinned stacks first
+  filtered = [
+    ...filtered.filter(s => state.pinnedStacks.has(s.stack_name)),
+    ...filtered.filter(s => !state.pinnedStacks.has(s.stack_name)),
+  ];
 
   if (!filtered.length) {
     els.stacksList.innerHTML = `<div class="card">${term ? 'No stacks match your search.' : 'No stacks deployed yet.'}</div>`;
@@ -382,30 +419,65 @@ function renderStacks(filter = '') {
     const containers = stack.runtime?.containers || [];
     const running = stack.runtime?.running;
     const name = escapeHtml(stack.stack_name);
+    const rawName = stack.stack_name;
     const dotClass = running ? 'dot-success' : (stack.runtime?.available === false ? 'dot-muted' : 'dot-danger');
     const badgeClass = running ? 'badge-success' : 'badge-danger';
     const summary = escapeHtml(stack.runtime?.summary || 'Unknown');
+    const pinned = state.pinnedStacks.has(rawName);
+    const category = escapeHtml(stack.category || '');
+
     const cTags = containers.map(c => {
       const cState = String(c.State || '').toLowerCase();
       return `<span class="container-tag ${cState === 'running' ? 'tag-ok' : 'tag-stopped'}">${escapeHtml(c.Service || c.Name || 'container')}</span>`;
     }).join('') || '';
+
     const ports = extractStackPorts(containers);
     const portTags = ports.map(p => `<span class="port-tag">${escapeHtml(p)}</span>`).join('');
+
+    // Resource usage for containers in this stack
+    const res = state.resources.filter(r => containers.some(c =>
+      (c.Name || c.Service || '').replace(/^\//, '') === (r.Name || '').replace(/^\//, '')
+    ));
+    const resHtml = res.map(r => `
+      <span class="res-tag" title="${escapeHtml(r.Name || '')}">
+        ${escapeHtml(r.CPUPerc || '?')} CPU · ${escapeHtml(r.MemUsage || '?')}
+      </span>`).join('');
+
+    const schedule = state.schedules[rawName];
+    const schedBadge = schedule?.enabled
+      ? `<span class="badge badge-muted" title="Scheduled restart: ${escapeHtml(schedule.cron)}">⏰ ${escapeHtml(schedule.cron)}</span>`
+      : '';
+
     return `
-      <div class="stack-card">
+      <div class="stack-card${pinned ? ' stack-pinned' : ''}">
         <div class="stack-card-header">
           <div class="stack-card-title">
             <span class="status-dot ${dotClass}"></span>
             <strong>${name}</strong>
             <span class="badge ${badgeClass}">${summary}</span>
             ${portTags ? `<span class="port-tags">${portTags}</span>` : ''}
+            ${schedBadge}
+            <button class="pin-btn${pinned ? ' pinned' : ''}" data-action="pin" data-stack-name="${name}" title="${pinned ? 'Unpin' : 'Pin to top'}">📌</button>
           </div>
           <div class="stack-card-meta">
+            ${category ? `<span class="meta-item cat-badge">${category}</span>` : ''}
             <span class="meta-item">🧩 ${escapeHtml(stack.template_id || 'custom')}</span>
             <span class="meta-item">📁 ${escapeHtml(stack.install_path || '—')}</span>
             <span class="meta-item" id="disk-${name}">
               <button class="btn-ghost btn-xs" data-action="diskusage" data-stack-name="${name}">Check disk</button>
             </span>
+            ${resHtml}
+          </div>
+          <div class="stack-health-row">
+            <span id="health-${name}" class="health-badge health-unknown" data-action="healthcheck" data-stack-name="${name}" style="cursor:pointer" title="Click to run health check">⬤ Health</span>
+            <select class="cat-select btn-xs" data-action="setcategory" data-stack-name="${name}" title="Set category">
+              <option value="">No category</option>
+              ${state.categories.map(c => `<option value="${escapeHtml(c)}"${stack.category === c ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+              <option value="__new__">+ New category…</option>
+            </select>
+            <input class="schedule-input" id="sched-${name}" type="text" placeholder="cron (e.g. 0 3 * * *)" value="${escapeHtml(schedule?.cron || '')}" style="width:140px;font-size:0.75rem" />
+            <button class="btn-ghost btn-xs" data-action="saveschedule" data-stack-name="${name}">Set schedule</button>
+            ${schedule ? `<button class="btn-ghost btn-xs" data-action="delschedule" data-stack-name="${name}">Clear</button>` : ''}
           </div>
           ${cTags ? `<div class="container-tags">${cTags}</div>` : ''}
         </div>
@@ -425,25 +497,51 @@ function renderStacks(filter = '') {
       </div>
     `;
   }).join('');
+
+  // Run health checks for all stacks non-blocking
+  filtered.forEach(stack => runHealthCheckUI(stack.stack_name));
 }
 
 async function refreshStacks() {
-  const stacks = await api('/api/stacks');
-  state.stacks = stacks;
+  const [stacks, schedules, categories] = await Promise.all([
+    api('/api/stacks'),
+    api('/api/schedules').catch(() => ({})),
+    api('/api/categories').catch(() => []),
+  ]);
+  state.stacks = stacks.map(s => ({ ...s, category: s.category || '' }));
+  state.schedules = schedules;
+  state.categories = categories;
   renderStacks(document.getElementById('stackSearch')?.value || '');
 }
 
 els.stacksList.addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-action]');
-  if (!btn) return;
-  const action = btn.dataset.action;
-  const stackName = btn.dataset.stackName;
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action;
+  const stackName = el.dataset.stackName;
   if (action === 'edit') await editStack(stackName);
   else if (action === 'logs') await viewLogs(stackName);
   else if (action === 'delete') await deleteStack(stackName);
   else if (action === 'update') await pullAndRedeployStack(stackName);
   else if (action === 'diskusage') await checkDiskUsage(stackName);
+  else if (action === 'pin') togglePin(stackName);
+  else if (action === 'healthcheck') await promptHealthConfig(stackName);
+  else if (action === 'saveschedule') await saveSchedule(stackName);
+  else if (action === 'delschedule') await deleteSchedule(stackName);
   else await stackAction(stackName, action);
+});
+
+els.stacksList.addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-action="setcategory"]');
+  if (!sel) return;
+  await setCategory(sel.dataset.stackName, sel.value);
+});
+
+document.getElementById('categoryTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.cat-tab');
+  if (!btn) return;
+  state.activeCategoryFilter = btn.dataset.cat;
+  renderStacks(document.getElementById('stackSearch')?.value || '');
 });
 
 function renderSystemStatus() {
@@ -519,16 +617,18 @@ function renderSystemStatus() {
 async function refreshAll() {
   els.statusBox.textContent = 'Refreshing data...';
   try {
-    const [health, templates, volumes, containers] = await Promise.all([
+    const [health, templates, volumes, containers, resources] = await Promise.all([
       api('/api/health'),
       api('/api/templates'),
       api('/api/volumes'),
       api('/api/containers'),
+      api('/api/resources').catch(() => []),
     ]);
     state.health = health;
     state.templates = templates;
     state.volumes = volumes;
     state.containers = containers;
+    state.resources = resources;
     renderTemplates();
     renderDynamicFields();
     renderSystemStatus();
@@ -594,6 +694,190 @@ async function saveEdit() {
     await refreshStacks();
   } catch (err) {
     els.statusBox.textContent = `Save failed: ${err.message}`;
+  }
+}
+
+// ── Health checks ─────────────────────────────────────────────────────────────
+
+async function runHealthCheckUI(stackName) {
+  const el = document.getElementById(`health-${stackName}`);
+  if (!el) return;
+  try {
+    const data = await api(`/api/stacks/${encodeURIComponent(stackName)}/health`);
+    if (!data.configured) {
+      el.className = 'health-badge health-unknown';
+      el.title = 'No health check configured — click to set one';
+      el.textContent = '⬤ Health';
+    } else if (data.ok) {
+      el.className = 'health-badge health-ok';
+      el.title = `Healthy — ${data.elapsed_ms}ms (HTTP ${data.status})`;
+      el.textContent = '⬤ Healthy';
+    } else {
+      el.className = 'health-badge health-fail';
+      el.title = data.error || `HTTP ${data.status} (expected ${data.expected_status})`;
+      el.textContent = '⬤ Unhealthy';
+    }
+  } catch { /* ignore */ }
+}
+
+async function promptHealthConfig(stackName) {
+  const url = prompt(`Health check URL for "${stackName}":\n(leave empty to remove)`,
+    document.getElementById(`health-${stackName}`)?.dataset?.url || '');
+  if (url === null) return;
+  if (!url.trim()) {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/health`, { method: 'DELETE' });
+    toast('Health check removed.', 'info');
+  } else {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/health`, {
+      method: 'PUT',
+      body: JSON.stringify({ url: url.trim() }),
+    });
+    toast('Health check saved.', 'success');
+  }
+  runHealthCheckUI(stackName);
+}
+
+// ── Schedule ──────────────────────────────────────────────────────────────────
+
+async function saveSchedule(stackName) {
+  const input = document.getElementById(`sched-${stackName}`);
+  const cron = input?.value.trim();
+  if (!cron) { toast('Enter a cron expression first.', 'error'); return; }
+  try {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/schedule`, {
+      method: 'PUT',
+      body: JSON.stringify({ cron, enabled: true }),
+    });
+    toast(`Schedule set for ${stackName}.`, 'success');
+    await refreshStacks();
+  } catch (err) {
+    toast(`Schedule failed: ${err.message}`, 'error');
+  }
+}
+
+async function deleteSchedule(stackName) {
+  try {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/schedule`, { method: 'DELETE' });
+    toast(`Schedule cleared for ${stackName}.`, 'info');
+    await refreshStacks();
+  } catch (err) {
+    toast(`Failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Categories ────────────────────────────────────────────────────────────────
+
+async function setCategory(stackName, category) {
+  if (category === '__new__') {
+    const newCat = prompt('New category name:');
+    if (!newCat?.trim()) return;
+    category = newCat.trim();
+  }
+  try {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/category`, {
+      method: 'PUT',
+      body: JSON.stringify({ category }),
+    });
+    await refreshStacks();
+  } catch (err) {
+    toast(`Failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Notifications settings ────────────────────────────────────────────────────
+
+async function loadNotifSettings() {
+  const status = document.getElementById('notifStatus');
+  try {
+    const data = await api('/api/settings/notifications');
+    document.getElementById('notifDiscord').value = data.discord_webhook || '';
+    document.getElementById('notifNtfy').value = data.ntfy_url || '';
+    document.getElementById('notifWebhook').value = data.webhook_url || '';
+    document.getElementById('notifEnabled').checked = !!data.enabled;
+    document.querySelectorAll('.notif-event').forEach(cb => {
+      cb.checked = (data.events || []).includes(cb.value);
+    });
+    status.textContent = 'Settings loaded.';
+  } catch (err) {
+    status.textContent = `Load failed: ${err.message}`;
+  }
+}
+
+async function saveNotifSettings() {
+  const status = document.getElementById('notifStatus');
+  const events = [...document.querySelectorAll('.notif-event:checked')].map(cb => cb.value);
+  try {
+    await api('/api/settings/notifications', {
+      method: 'PUT',
+      body: JSON.stringify({
+        discord_webhook: document.getElementById('notifDiscord').value.trim(),
+        ntfy_url: document.getElementById('notifNtfy').value.trim(),
+        webhook_url: document.getElementById('notifWebhook').value.trim(),
+        enabled: document.getElementById('notifEnabled').checked,
+        events,
+      }),
+    });
+    toast('Notification settings saved.', 'success');
+    status.textContent = 'Saved.';
+  } catch (err) {
+    status.textContent = `Save failed: ${err.message}`;
+  }
+}
+
+async function testNotification() {
+  const status = document.getElementById('notifStatus');
+  try {
+    await api('/api/settings/notifications/test', { method: 'POST' });
+    toast('Test notification sent.', 'success');
+    status.textContent = 'Test sent — check your configured channels.';
+  } catch (err) {
+    status.textContent = `Test failed: ${err.message}`;
+  }
+}
+
+// ── Backup / Restore ──────────────────────────────────────────────────────────
+
+async function downloadBackup() {
+  const status = document.getElementById('backupStatus');
+  status.textContent = 'Creating backup…';
+  try {
+    const headers = {};
+    if (state.authConfig.mode === 'local' && state.token) headers.Authorization = `Bearer ${state.token}`;
+    const res = await fetch(`${API_BASE}/api/backup`, { headers, credentials: 'include' });
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `homestack-backup-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+    a.click();
+    URL.revokeObjectURL(url);
+    status.textContent = 'Backup downloaded.';
+  } catch (err) {
+    status.textContent = `Backup failed: ${err.message}`;
+  }
+}
+
+async function restoreBackup() {
+  const fileInput = document.getElementById('restoreFile');
+  const status = document.getElementById('backupStatus');
+  if (!fileInput.files.length) { status.textContent = 'Select a .tar.gz file first.'; return; }
+  if (!confirm('Restore this backup? All current data will be overwritten.')) return;
+  status.textContent = 'Uploading…';
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  try {
+    const headers = {};
+    if (state.authConfig.mode === 'local' && state.token) headers.Authorization = `Bearer ${state.token}`;
+    const res = await fetch(`${API_BASE}/api/restore`, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+    toast(data.message, 'success');
+    status.textContent = data.message;
+    fileInput.value = '';
+  } catch (err) {
+    status.textContent = `Restore failed: ${err.message}`;
+    toast(`Restore failed: ${err.message}`, 'error');
   }
 }
 
@@ -859,7 +1143,10 @@ function switchView(name) {
 
 function wireNavigation() {
   document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.addEventListener('click', () => switchView(btn.dataset.view));
+    btn.addEventListener('click', () => {
+      switchView(btn.dataset.view);
+      if (btn.dataset.view === 'settings') loadNotifSettings();
+    });
   });
   document.querySelectorAll('.auth-tab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -905,6 +1192,27 @@ document.getElementById('builderSave').addEventListener('click', saveTemplate);
 document.getElementById('builderGenerateExample').addEventListener('click', templateExample);
 document.getElementById('pluginInstallGitBtn').addEventListener('click', pluginInstallGit);
 document.getElementById('pluginInstallZipBtn').addEventListener('click', pluginInstallZip);
+
+document.getElementById('notifSaveBtn').addEventListener('click', saveNotifSettings);
+document.getElementById('notifTestBtn').addEventListener('click', testNotification);
+document.getElementById('backupDownloadBtn').addEventListener('click', downloadBackup);
+document.getElementById('restoreBtn').addEventListener('click', restoreBackup);
+
+const hamburgerBtn = document.getElementById('hamburgerBtn');
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
+function closeSidebar() {
+  sidebar.classList.remove('open');
+  sidebarOverlay.classList.remove('open');
+}
+hamburgerBtn.addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+  sidebarOverlay.classList.toggle('open');
+});
+sidebarOverlay.addEventListener('click', closeSidebar);
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', closeSidebar);
+});
 
 document.getElementById('pluginsList').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-plugin-action]');

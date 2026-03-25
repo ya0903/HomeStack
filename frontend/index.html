@@ -57,9 +57,13 @@
 </div>
 
 <!-- App -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
 <div class="app-shell">
 
-  <aside class="sidebar">
+  <button class="hamburger" id="hamburgerBtn" title="Open menu">☰</button>
+
+  <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <h1>HomeStack</h1>
       <p>Docker Compose manager</p>
@@ -80,6 +84,9 @@
       </button>
       <button class="nav-btn" data-view="plugins">
         <span class="nav-icon">🔌</span> Plugins
+      </button>
+      <button class="nav-btn" data-view="settings">
+        <span class="nav-icon">🛠️</span> Settings
       </button>
     </nav>
 
@@ -161,6 +168,7 @@
           <button id="refreshStacksBtn">Refresh</button>
         </div>
       </div>
+      <div id="categoryTabs" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.9rem"></div>
       <div id="stacksList"></div>
     </section>
 
@@ -239,6 +247,65 @@
       <div id="pluginsList"><p class="hint">No plugins installed.</p></div>
 
       <pre id="pluginStatus" style="margin-top:1rem">Install a plugin to extend HomeStack.</pre>
+    </section>
+
+    <!-- Settings -->
+    <section class="panel hidden" id="view-settings">
+      <div class="panel-header">
+        <h2>🛠️ Settings</h2>
+      </div>
+
+      <!-- Notifications -->
+      <div class="subpanel" style="margin-bottom:1.2rem">
+        <div class="panel-header compact"><h3>Notifications</h3></div>
+        <div class="form-grid" style="margin-bottom:0.75rem">
+          <label>Discord webhook URL
+            <input id="notifDiscord" type="text" placeholder="https://discord.com/api/webhooks/…" />
+          </label>
+          <label>ntfy URL
+            <input id="notifNtfy" type="text" placeholder="https://ntfy.sh/your-topic" />
+          </label>
+          <label>Generic webhook URL
+            <input id="notifWebhook" type="text" placeholder="https://your-server/hook" />
+          </label>
+        </div>
+        <div style="margin-bottom:0.75rem">
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+            <input id="notifEnabled" type="checkbox" />
+            <span>Enable notifications</span>
+          </label>
+        </div>
+        <div style="font-size:0.82rem;color:var(--text-2);margin-bottom:0.6rem">Notify on events:</div>
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.9rem">
+          <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer"><input type="checkbox" class="notif-event" value="stack_deployed" /> Stack deployed</label>
+          <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer"><input type="checkbox" class="notif-event" value="stack_deleted" /> Stack deleted</label>
+          <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer"><input type="checkbox" class="notif-event" value="health_fail" /> Health check failed</label>
+        </div>
+        <div class="button-row">
+          <button id="notifSaveBtn" class="primary">Save</button>
+          <button id="notifTestBtn">Send test</button>
+        </div>
+        <pre id="notifStatus" style="margin-top:0.75rem">Load settings to configure.</pre>
+      </div>
+
+      <!-- Backup / Restore -->
+      <div class="subpanel">
+        <div class="panel-header compact"><h3>Backup & Restore</h3></div>
+        <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:0.9rem">
+          Backup exports all stacks, templates, plugins, and settings as a <code>.tar.gz</code>. Restore replaces all data — restart HomeStack after restoring.
+        </p>
+        <div class="button-row" style="align-items:flex-end">
+          <button id="backupDownloadBtn" class="primary">Download backup</button>
+          <label style="flex:1">
+            <span style="font-size:0.82rem;color:var(--text-2);display:block;margin-bottom:0.4rem">Restore from backup</span>
+            <div style="display:flex;gap:0.5rem">
+              <input id="restoreFile" type="file" accept=".tar.gz,.tgz" style="flex:1" />
+              <button id="restoreBtn">Restore</button>
+            </div>
+          </label>
+        </div>
+        <pre id="backupStatus" style="margin-top:0.75rem">Ready.</pre>
+      </div>
     </section>
 
     <!-- Plugin-injected panels rendered here -->
