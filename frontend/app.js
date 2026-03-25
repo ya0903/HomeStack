@@ -42,12 +42,134 @@ const state = {
   volumes: [],
   containers: [],
   stacks: [],
+  plugins: [],
   health: null,
   authConfig: { mode: 'local', login_url: '/', local_auth_enabled: true },
   token: localStorage.getItem('homeStackToken') || '',
   user: JSON.parse(localStorage.getItem('homeStackUser') || 'null'),
   editingStack: null,
 };
+
+// ── Plugin registry ───────────────────────────────────────────────────────────
+const pluginRegistry = {
+  panels: {},        // id → { title, html }
+  sidebarItems: [],  // { icon, label, panelId }
+  stackActions: [],  // { label, callback }
+  eventListeners: {}, // event → [callback]
+};
+
+const PluginAPI = {
+  /** Register a new full-panel view accessible from the sidebar */
+  registerPanel(id, title, htmlContent) {
+    pluginRegistry.panels[id] = { title, html: htmlContent };
+    const container = document.getElementById('pluginPanels');
+    const existing = document.getElementById(`view-plugin-${id}`);
+    if (existing) existing.remove();
+    const section = document.createElement('section');
+    section.className = 'panel hidden';
+    section.id = `view-plugin-${id}`;
+    section.innerHTML = `<div class="panel-header"><h2>${escapeHtml(title)}</h2></div>${htmlContent}`;
+    container.appendChild(section);
+  },
+
+  /** Add a nav item in the sidebar linking to a registered panel */
+  registerSidebarItem(icon, label, panelId) {
+    pluginRegistry.sidebarItems.push({ icon, label, panelId });
+    const nav = document.querySelector('.sidebar-nav');
+    const btnId = `plugin-nav-${panelId}`;
+    if (document.getElementById(btnId)) return;
+    const btn = document.createElement('button');
+    btn.className = 'nav-btn';
+    btn.id = btnId;
+    btn.dataset.view = `plugin-${panelId}`;
+    btn.innerHTML = `<span class="nav-icon">${icon}</span> ${escapeHtml(label)}`;
+    btn.addEventListener('click', () => switchView(`plugin-${panelId}`));
+    nav.appendChild(btn);
+  },
+
+  /** Add a button to every stack card — callback receives the stack name */
+  registerStackAction(label, callback) {
+    pluginRegistry.stackActions.push({ label, callback });
+  },
+
+  /** Subscribe to app events: stackDeployed, stackDeleted, containerImported */
+  onEvent(event, callback) {
+    if (!pluginRegistry.eventListeners[event]) pluginRegistry.eventListeners[event] = [];
+    pluginRegistry.eventListeners[event].push(callback);
+  },
+
+  /** Make an authenticated API call to the HomeStack backend */
+  fetch(path, options = {}) {
+    return api(path, options);
+  },
+
+  /** Show a toast notification */
+  toast(msg, type = 'info') {
+    toast(msg, type);
+  },
+
+  /** Read current app state (stacks, containers, templates, health) */
+  getState() {
+    return {
+      stacks: state.stacks,
+      containers: state.containers,
+      templates: state.templates,
+      health: state.health,
+      user: state.user,
+    };
+  },
+};
+
+function emitPluginEvent(event, data) {
+  (pluginRegistry.eventListeners[event] || []).forEach(cb => {
+    try { cb(data); } catch { /* plugin error — don't crash the app */ }
+  });
+}
+
+async function loadPlugins() {
+  try {
+    const plugins = await api('/api/plugins');
+    state.plugins = plugins;
+    for (const plugin of plugins) {
+      if (!plugin.enabled) continue;
+      await loadPluginAssets(plugin);
+    }
+    renderPlugins();
+  } catch { /* plugins are non-critical */ }
+}
+
+async function loadPluginAssets(plugin) {
+  try {
+    if (plugin.styles) {
+      const styleId = `plugin-style-${plugin.id}`;
+      if (!document.getElementById(styleId)) {
+        const link = document.createElement('link');
+        link.id = styleId;
+        link.rel = 'stylesheet';
+        link.href = `/api/plugins/${encodeURIComponent(plugin.id)}/assets/${encodeURIComponent(plugin.styles)}`;
+        document.head.appendChild(link);
+      }
+    }
+    if (plugin.entry) {
+      const scriptUrl = `/api/plugins/${encodeURIComponent(plugin.id)}/assets/${encodeURIComponent(plugin.entry)}`;
+      const scriptId = `plugin-script-${plugin.id}`;
+      if (document.getElementById(scriptId)) return;
+      // Use dynamic import so plugins can use ES module syntax
+      const mod = await import(scriptUrl);
+      if (typeof mod.init === 'function') {
+        mod.init(PluginAPI);
+      } else if (typeof mod.default === 'function') {
+        mod.default(PluginAPI);
+      }
+      // Mark as loaded
+      const marker = document.createElement('meta');
+      marker.id = scriptId;
+      document.head.appendChild(marker);
+    }
+  } catch (err) {
+    console.warn(`[HomeStack] Failed to load plugin "${plugin.id}":`, err);
+  }
+}
 
 const els = {
   authOverlay: document.getElementById('authOverlay'),
@@ -379,6 +501,7 @@ async function refreshAll() {
     renderDynamicFields();
     renderSystemStatus();
     await refreshStacks();
+    await loadPlugins();
     els.statusBox.textContent = 'Ready.';
   } catch (err) {
     if (state.authConfig.mode === 'local' && String(err.message).toLowerCase().includes('token')) clearAuth();
@@ -404,6 +527,7 @@ async function deployStack() {
         body: JSON.stringify({ stack_name: stackName, install_path: installPath, compose_content: composeContent }),
       });
       els.statusBox.textContent = JSON.stringify(data, null, 2);
+      emitPluginEvent('stackDeployed', data);
       await refreshStacks();
     } catch (err) {
       els.statusBox.textContent = `Deploy failed: ${err.message}`;
@@ -418,6 +542,7 @@ async function deployStack() {
       body: JSON.stringify(payload),
     });
     els.statusBox.textContent = JSON.stringify(data, null, 2);
+    emitPluginEvent('stackDeployed', data);
     await refreshStacks();
   } catch (err) {
     els.statusBox.textContent = `Deploy failed: ${err.message}`;
@@ -507,6 +632,7 @@ async function deleteStack(stackName) {
   try {
     await api(`/api/stacks/${stackName}?delete_data=${deleteData}`, { method: 'DELETE' });
     els.statusBox.textContent = `Stack "${stackName}" deleted.`;
+    emitPluginEvent('stackDeleted', { stack_name: stackName });
     await refreshStacks();
   } catch (err) {
     els.statusBox.textContent = `Delete failed: ${err.message}`;
@@ -546,12 +672,80 @@ async function importContainer(containerName) {
     await api(`/api/containers/${encodeURIComponent(containerName)}/import`, { method: 'POST' });
     toast(`Imported "${containerName}" as a stack.`, 'success');
     els.statusBox.textContent = `Imported "${containerName}" as a stack.`;
+    emitPluginEvent('containerImported', { container_name: containerName });
     await refreshStacks();
     renderSystemStatus();
     switchView('stacks');
   } catch (err) {
     toast(`Import failed: ${err.message}`, 'error');
     els.statusBox.textContent = `Import failed: ${err.message}`;
+  }
+}
+
+function renderPlugins() {
+  const list = document.getElementById('pluginsList');
+  if (!list) return;
+  if (!state.plugins.length) {
+    list.innerHTML = '<p class="hint">No plugins installed.</p>';
+    return;
+  }
+  list.innerHTML = state.plugins.map(p => `
+    <div class="plugin-card">
+      <div class="plugin-card-info">
+        <strong>${escapeHtml(p.name || p.id)}</strong>
+        <span class="hint">v${escapeHtml(p.version || '?')} ${p.author ? `by ${escapeHtml(p.author)}` : ''}</span>
+        ${p.description ? `<p class="plugin-desc">${escapeHtml(p.description)}</p>` : ''}
+      </div>
+      <div class="plugin-card-actions">
+        <span class="badge ${p.enabled ? 'badge-success' : 'badge-muted'}">${p.enabled ? 'Enabled' : 'Disabled'}</span>
+        <button class="btn-sm btn-ghost" data-plugin-action="toggle" data-plugin-id="${escapeHtml(p.id)}">${p.enabled ? 'Disable' : 'Enable'}</button>
+        <button class="btn-sm btn-danger" data-plugin-action="uninstall" data-plugin-id="${escapeHtml(p.id)}">Uninstall</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function pluginInstallGit() {
+  const url = document.getElementById('pluginGitUrl').value.trim();
+  const status = document.getElementById('pluginStatus');
+  if (!url) { status.textContent = 'Enter a git URL first.'; return; }
+  status.textContent = 'Cloning plugin...';
+  try {
+    const data = await api('/api/plugins/install/git', {
+      method: 'POST',
+      body: JSON.stringify({ git_url: url }),
+    });
+    toast(`Plugin "${data.name || data.id}" installed.`, 'success');
+    status.textContent = `Installed: ${data.name || data.id} v${data.version}`;
+    document.getElementById('pluginGitUrl').value = '';
+    await loadPlugins();
+  } catch (err) {
+    toast(`Install failed: ${err.message}`, 'error');
+    status.textContent = `Install failed: ${err.message}`;
+  }
+}
+
+async function pluginInstallZip() {
+  const fileInput = document.getElementById('pluginZipFile');
+  const status = document.getElementById('pluginStatus');
+  if (!fileInput.files.length) { status.textContent = 'Select a ZIP file first.'; return; }
+  const file = fileInput.files[0];
+  status.textContent = 'Uploading plugin...';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const headers = {};
+    if (state.authConfig.mode === 'local' && state.token) headers.Authorization = `Bearer ${state.token}`;
+    const res = await fetch(`${API_BASE}/api/plugins/install/zip`, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+    toast(`Plugin "${data.name || data.id}" installed.`, 'success');
+    status.textContent = `Installed: ${data.name || data.id} v${data.version}`;
+    fileInput.value = '';
+    await loadPlugins();
+  } catch (err) {
+    toast(`Upload failed: ${err.message}`, 'error');
+    status.textContent = `Upload failed: ${err.message}`;
   }
 }
 
@@ -673,6 +867,35 @@ document.getElementById('loginBtn').addEventListener('click', login);
 document.getElementById('registerBtn').addEventListener('click', register);
 document.getElementById('builderSave').addEventListener('click', saveTemplate);
 document.getElementById('builderGenerateExample').addEventListener('click', templateExample);
+document.getElementById('pluginInstallGitBtn').addEventListener('click', pluginInstallGit);
+document.getElementById('pluginInstallZipBtn').addEventListener('click', pluginInstallZip);
+
+document.getElementById('pluginsList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-plugin-action]');
+  if (!btn) return;
+  const action = btn.dataset.pluginAction;
+  const pluginId = btn.dataset.pluginId;
+  const status = document.getElementById('pluginStatus');
+  if (action === 'toggle') {
+    try {
+      const data = await api(`/api/plugins/${encodeURIComponent(pluginId)}/toggle`, { method: 'POST' });
+      toast(`Plugin ${data.enabled ? 'enabled' : 'disabled'}.`, 'info');
+      await loadPlugins();
+    } catch (err) {
+      toast(`Toggle failed: ${err.message}`, 'error');
+    }
+  } else if (action === 'uninstall') {
+    if (!confirm(`Uninstall plugin "${pluginId}"?`)) return;
+    try {
+      await api(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' });
+      toast(`Plugin "${pluginId}" uninstalled.`, 'success');
+      status.textContent = `Plugin "${pluginId}" uninstalled. Reload the page to remove its UI elements.`;
+      await loadPlugins();
+    } catch (err) {
+      toast(`Uninstall failed: ${err.message}`, 'error');
+    }
+  }
+});
 els.ssoRetryBtn.addEventListener('click', async () => {
   try {
     const me = await api('/api/auth/me');
