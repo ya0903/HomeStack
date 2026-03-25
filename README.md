@@ -1,30 +1,80 @@
+<div align="center">
+
+<img src="docs/screenshots/banner.png" alt="HomeStack Banner" width="100%" />
+
 # HomeStack
 
-A self-hosted web UI for deploying and managing Docker Compose stacks on your Linux homeserver.
+**A self-hosted web UI for deploying and managing Docker Compose stacks on your Linux homeserver.**
 
-Built for homelabbers who want a clean interface to deploy, monitor, update, and organise their self-hosted services — without touching the terminal every time.
+Built for homelabbers who want a clean, modern interface to deploy, monitor, update, and organise their self-hosted services — without touching the terminal every time.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Docker](https://img.shields.io/badge/Docker-required-2496ED?logo=docker&logoColor=white)](https://docker.com)
+[![Nginx](https://img.shields.io/badge/Nginx-Alpine-009639?logo=nginx&logoColor=white)](https://nginx.org)
+
+[Quick Install](#quick-install) · [Features](#features) · [Screenshots](#screenshots) · [Configuration](#configuration) · [Adding Templates](#adding-templates)
+
+</div>
+
+---
+
+## Screenshots
+
+<div align="center">
+
+| Deploy | Stacks |
+|--------|--------|
+| <img src="docs/screenshots/deploy.png" width="420" /> | <img src="docs/screenshots/stacks.png" width="420" /> |
+
+| System Status | Templates |
+|--------------|-----------|
+| <img src="docs/screenshots/system.png" width="420" /> | <img src="docs/screenshots/templates.png" width="420" /> |
+
+</div>
 
 ---
 
 ## Features
 
-- **Deploy stacks** from built-in templates or paste your own `docker-compose.yml`
-- **Built-in templates** — Jellyfin, Nextcloud, qBittorrent, Radarr, Sonarr, Bazarr, Prowlarr, Immich, Vaultwarden, Komga, Arr-stack
-- **Custom template builder** — create reusable templates with placeholder variables
-- **Import existing containers** — auto-generate a compose file from any running container
-- **Live container status** — see every container on the host with state, image, and ports
-- **One-click update** — pull latest images and redeploy with a single button
-- **Disk usage** — check how much space each stack's data directory is using
-- **Duplicate detection** — warns if a stack name or port conflicts with a running container
-- **Auto-refresh** — container and stack status refreshes every 30 seconds
-- **Search and filter** — across stacks and containers
-- **Dark and light theme** — persists across sessions
-- **Local authentication** — JWT-based login, first account becomes admin
-- **Authelia SSO support** — optional, via reverse proxy header
+### Core
+
+| | Feature | Description |
+|---|---|---|
+| 🚀 | **Deploy stacks** | From built-in templates or paste your own `docker-compose.yml` |
+| 📦 | **Built-in templates** | Jellyfin, Nextcloud, qBittorrent, Radarr, Sonarr, Bazarr, Prowlarr, Immich, Vaultwarden, Komga, Arr-stack |
+| 🧩 | **Custom template builder** | Create reusable templates with placeholder variables |
+| 📥 | **Import existing containers** | Auto-generate a compose file from any running container |
+| ♻️ | **One-click update** | Pull latest images and redeploy with a single button |
+
+### Visibility
+
+| | Feature | Description |
+|---|---|---|
+| 🟢 | **Live container status** | Every container on the host with state, image, and ports |
+| 💾 | **Disk usage** | Check how much space each stack's data directory is using |
+| 🔁 | **Auto-refresh** | Container and stack status refreshes every 30 seconds |
+| 🔍 | **Search and filter** | Across stacks and containers |
+
+### Safety
+
+| | Feature | Description |
+|---|---|---|
+| ⚠️ | **Duplicate detection** | Warns if a stack name or port conflicts with a running container |
+| 🔐 | **Local authentication** | JWT-based login — first account becomes admin |
+| 🔑 | **Authelia SSO** | Optional, via reverse proxy header |
+
+### UI
+
+| | Feature | Description |
+|---|---|---|
+| 🌙 | **Dark and light theme** | Persists across sessions |
+| 📱 | **Responsive layout** | Works on any screen size |
 
 ---
 
-## Quick install
+## Quick Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ya0903/HomeStack/main/install.sh | bash
@@ -35,11 +85,11 @@ The script will ask for:
 - Frontend port (default: `7080`)
 - Backend port (default: `7079`)
 
-First account you create becomes admin.
+> **Note:** First account you create becomes admin.
 
 ---
 
-## Manual install
+## Manual Install
 
 **Requirements:** Docker, Docker Compose plugin, Git
 
@@ -85,7 +135,7 @@ Copy `.env.example` to `.env` and edit as needed:
 
 ---
 
-## File structure
+## File Structure
 
 ```
 HomeStack/
@@ -95,7 +145,7 @@ HomeStack/
 ├── backend/
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   └── app/                   # FastAPI backend
+│   └── app/
 │       ├── main.py            # API routes
 │       ├── auth.py            # Authentication
 │       ├── docker_ops.py      # Docker/Compose operations
@@ -105,7 +155,7 @@ HomeStack/
 │   ├── index.html
 │   ├── app.js
 │   ├── styles.css
-│   └── nginx.conf             # Nginx reverse proxy config
+│   └── nginx.conf
 └── templates/                 # Built-in stack templates
     ├── jellyfin/
     │   ├── template.json
@@ -113,11 +163,11 @@ HomeStack/
     └── ...
 ```
 
-Runtime data (deployed stacks, user database, custom templates) is stored in `data/` — this directory is gitignored. **Back it up.**
+> Runtime data (deployed stacks, user database, custom templates) is stored in `data/` — this directory is gitignored. **Back it up.**
 
 ---
 
-## Adding templates
+## Adding Templates
 
 Each template lives in `templates/<name>/` and needs two files:
 
@@ -150,7 +200,7 @@ You can also create templates directly from the **Template builder** tab in the 
 
 ---
 
-## Tech stack
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -165,4 +215,4 @@ You can also create templates directly from the **Template builder** tab in the 
 
 ## License
 
-MIT
+MIT — do whatever you want with it.
