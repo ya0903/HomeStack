@@ -271,8 +271,13 @@ function renderTemplates() {
 function applyTemplateDefaults() {
   const tpl = activeTemplate();
   if (tpl) {
+    els.stackName.placeholder = tpl.id;
+    els.installPath.placeholder = `/opt/homelab/${tpl.default_install_subdir}`;
     if (!els.stackName.value) els.stackName.value = tpl.id;
     if (!els.installPath.value) els.installPath.value = `/opt/homelab/${tpl.default_install_subdir}`;
+  } else {
+    els.stackName.placeholder = 'my-stack';
+    els.installPath.placeholder = '/opt/homelab/my-stack';
   }
   renderDynamicFields();
 }
@@ -839,7 +844,11 @@ function wireNavigation() {
   });
 }
 
-els.templateSelect.addEventListener('change', () => renderDynamicFields());
+els.templateSelect.addEventListener('change', () => {
+  els.stackName.value = '';
+  els.installPath.value = '';
+  applyTemplateDefaults();
+});
 els.installPath.addEventListener('input', () => renderDynamicFields());
 els.stackName.addEventListener('input', () => {
   const name = els.stackName.value.trim().toLowerCase();
