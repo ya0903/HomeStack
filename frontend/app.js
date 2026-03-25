@@ -1,6 +1,25 @@
 const API_BASE = '';
 // For local dev with separate servers, set API_BASE = 'http://localhost:8000'
 
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 280);
+  }, 3800);
+}
+
+function initTheme() {
+  const saved = localStorage.getItem('hs-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = saved === 'dark' ? '🌙' : '☀️';
+}
+
 function getUsedHostPorts() {
   const ports = new Set();
   state.containers.forEach(c => {
@@ -97,9 +116,12 @@ function clearAuth() {
 }
 
 function renderUser() {
-  els.currentUser.textContent = state.user ? state.user.username : 'Not signed in';
-  els.currentRole.textContent = state.user ? state.user.role : 'Guest';
+  const u = state.user;
+  els.currentUser.textContent = u ? u.username : 'Not signed in';
+  els.currentRole.textContent = u ? u.role : 'Guest';
   els.authModeBadge.textContent = `Auth mode: ${state.authConfig.mode}`;
+  const avatar = document.getElementById('userAvatar');
+  if (avatar) avatar.textContent = u ? u.username.slice(0, 2).toUpperCase() : '?';
 }
 
 function renderAuthMode() {
@@ -208,39 +230,44 @@ function renderStacks(filter = '') {
   els.stacksList.innerHTML = filtered.map(stack => {
     const containers = stack.runtime?.containers || [];
     const running = stack.runtime?.running;
-    const runningClass = running ? 'ok' : 'danger';
-    const dot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${running ? '#2ecc71' : '#e74c3c'};margin-right:6px;vertical-align:middle"></span>`;
     const name = escapeHtml(stack.stack_name);
+    const dotClass = running ? 'dot-success' : (stack.runtime?.available === false ? 'dot-muted' : 'dot-danger');
+    const badgeClass = running ? 'badge-success' : 'badge-danger';
+    const summary = escapeHtml(stack.runtime?.summary || 'Unknown');
+    const cTags = containers.map(c => {
+      const cState = String(c.State || '').toLowerCase();
+      return `<span class="container-tag ${cState === 'running' ? 'tag-ok' : 'tag-stopped'}">${escapeHtml(c.Service || c.Name || 'container')}</span>`;
+    }).join('') || '';
     return `
-      <div class="card card-grid">
-        <div>
-          <h3>${dot}${name}</h3>
-          <div class="kv">
-            <strong>Template</strong><span>${escapeHtml(stack.template_id || 'Unknown')}</span>
-            <strong>Install path</strong><span>${escapeHtml(stack.install_path || 'Unknown')}</span>
-            <strong>Status</strong><span class="${runningClass}">${escapeHtml(stack.runtime?.summary || 'Unknown')}</span>
-            <strong>Compose</strong><span>${escapeHtml(stack.compose_path || '')}</span>
-            <strong>Disk usage</strong><span id="disk-${name}"><button class="small" data-action="diskusage" data-stack-name="${name}">Check</button></span>
+      <div class="stack-card">
+        <div class="stack-card-header">
+          <div class="stack-card-title">
+            <span class="status-dot ${dotClass}"></span>
+            <strong>${name}</strong>
+            <span class="badge ${badgeClass}">${summary}</span>
           </div>
-          <div>
-            ${containers.map(c => `<span class="tag">${escapeHtml(c.Service || c.Name || 'container')}: ${escapeHtml(String(c.State || 'unknown'))}</span>`).join('') || '<span class="hint">No container status yet.</span>'}
+          <div class="stack-card-meta">
+            <span class="meta-item">🧩 ${escapeHtml(stack.template_id || 'custom')}</span>
+            <span class="meta-item">📁 ${escapeHtml(stack.install_path || '—')}</span>
+            <span class="meta-item" id="disk-${name}">
+              <button class="btn-ghost btn-xs" data-action="diskusage" data-stack-name="${name}">Check disk</button>
+            </span>
           </div>
+          ${cTags ? `<div class="container-tags">${cTags}</div>` : ''}
         </div>
-        <div>
-          <div class="button-row">
-            <button data-action="edit" data-stack-name="${name}">Edit</button>
-            <button data-action="start" data-stack-name="${name}">Start</button>
-            <button data-action="stop" data-stack-name="${name}">Stop</button>
-            <button data-action="restart" data-stack-name="${name}">Restart</button>
-            <button data-action="update" data-stack-name="${name}">Update</button>
-            <button data-action="logs" data-stack-name="${name}">Logs</button>
-            <button data-action="delete" data-stack-name="${name}">Delete</button>
-          </div>
-          <details>
-            <summary>Last action output</summary>
-            <pre id="logs-${name}">Logs appear here.</pre>
-          </details>
+        <div class="stack-card-actions">
+          <button class="btn-sm" data-action="edit" data-stack-name="${name}">Edit</button>
+          <button class="btn-sm btn-success" data-action="start" data-stack-name="${name}">▶ Start</button>
+          <button class="btn-sm btn-warning" data-action="stop" data-stack-name="${name}">⏹ Stop</button>
+          <button class="btn-sm" data-action="restart" data-stack-name="${name}">↺ Restart</button>
+          <button class="btn-sm btn-accent" data-action="update" data-stack-name="${name}">⬆ Update</button>
+          <button class="btn-sm btn-ghost" data-action="logs" data-stack-name="${name}">📋 Logs</button>
+          <button class="btn-sm btn-danger" data-action="delete" data-stack-name="${name}">🗑 Delete</button>
         </div>
+        <details class="stack-logs">
+          <summary>Last action output</summary>
+          <pre id="logs-${name}">Logs appear here.</pre>
+        </details>
       </div>
     `;
   }).join('');
@@ -297,22 +324,37 @@ function renderSystemStatus() {
   }).join('') || `<tr><td colspan="5" class="hint" style="padding:0.6em">${term ? 'No containers match search.' : 'No containers found (Docker may be unavailable)'}</td></tr>`;
 
   els.systemStatus.innerHTML = `
-    <div class="grid">
-      <div class="card"><strong>Docker available</strong><div class="${dockerOk ? 'ok' : 'danger'}">${dockerOk}</div></div>
-      <div class="card"><strong>Docker Compose available</strong><div class="${composeOk ? 'ok' : 'danger'}">${composeOk}</div></div>
-      <div class="card"><strong>Auth mode</strong><div>${escapeHtml(state.authConfig.mode)}</div></div>
-      <div class="card"><strong>Named volumes</strong><div>${state.volumes.length}</div></div>
-      <div class="card"><strong>Templates</strong><div>${state.templates.length}</div></div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Docker</div>
+        <div class="stat-value ${dockerOk ? 'ok' : 'danger'}">${dockerOk ? '✓' : '✗'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Compose</div>
+        <div class="stat-value ${composeOk ? 'ok' : 'danger'}">${composeOk ? '✓' : '✗'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Auth mode</div>
+        <div class="stat-value" style="font-size:1rem">${escapeHtml(state.authConfig.mode)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Volumes</div>
+        <div class="stat-value">${state.volumes.length}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Templates</div>
+        <div class="stat-value">${state.templates.length}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Containers</div>
+        <div class="stat-value">${state.containers.length}</div>
+      </div>
     </div>
-    <h3 style="margin-top:1.5em">All containers on this host (${filtered.length}${term ? ' shown' : ''})</h3>
-    <div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:0.9em">
-        <thead><tr style="text-align:left;border-bottom:1px solid #444">
-          <th style="padding:0.4em 0.6em">Name</th>
-          <th style="padding:0.4em 0.6em">Image</th>
-          <th style="padding:0.4em 0.6em">State</th>
-          <th style="padding:0.4em 0.6em">Ports</th>
-          <th style="padding:0.4em 0.6em">Actions</th>
+    <h3 style="margin-bottom:0.6rem">All containers on this host${term ? ` — ${filtered.length} shown` : ` (${filtered.length})`}</h3>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr>
+          <th>Name</th><th>Image</th><th>State</th><th>Ports</th><th>Actions</th>
         </tr></thead>
         <tbody>${containerRows}</tbody>
       </table>
@@ -435,11 +477,13 @@ async function stackAction(stackName, action) {
       body: JSON.stringify({ action }),
     });
     const msg = data.message || `Stack ${action} completed.`;
+    toast(msg, 'success');
     els.statusBox.textContent = msg;
     const logBox = document.getElementById(`logs-${stackName}`);
     if (logBox) logBox.textContent = JSON.stringify(data, null, 2);
     await refreshStacks();
   } catch (err) {
+    toast(`Action failed: ${err.message}`, 'error');
     els.statusBox.textContent = `Action failed: ${err.message}`;
     const logBox = document.getElementById(`logs-${stackName}`);
     if (logBox) logBox.textContent = `Action failed: ${err.message}`;
@@ -470,21 +514,24 @@ async function deleteStack(stackName) {
 }
 
 async function pullAndRedeployStack(stackName) {
+  toast(`Pulling latest images for ${stackName}…`, 'info');
   els.statusBox.textContent = `Pulling latest images for ${stackName}...`;
   try {
     const data = await api(`/api/stacks/${stackName}/pull`, { method: 'POST' });
-    els.statusBox.textContent = data.message || 'Stack updated.';
+    toast(data.message || 'Stack updated.', 'success');
+    els.statusBox.textContent = JSON.stringify(data, null, 2);
     const logBox = document.getElementById(`logs-${stackName}`);
     if (logBox) logBox.textContent = JSON.stringify(data, null, 2);
     await refreshStacks();
   } catch (err) {
+    toast(`Update failed: ${err.message}`, 'error');
     els.statusBox.textContent = `Update failed: ${err.message}`;
   }
 }
 
 async function checkDiskUsage(stackName) {
   const el = document.getElementById(`disk-${stackName}`);
-  if (el) el.textContent = 'Checking...';
+  if (el) el.textContent = 'Checking…';
   try {
     const data = await api(`/api/stacks/${stackName}/diskusage`);
     if (el) el.textContent = data.disk_usage || 'N/A';
@@ -497,11 +544,13 @@ async function importContainer(containerName) {
   if (!confirm(`Import "${containerName}" as a HomeStack-managed stack?\n\nThis generates a docker-compose.yml from the running container so you can manage it here.`)) return;
   try {
     await api(`/api/containers/${encodeURIComponent(containerName)}/import`, { method: 'POST' });
+    toast(`Imported "${containerName}" as a stack.`, 'success');
     els.statusBox.textContent = `Imported "${containerName}" as a stack.`;
     await refreshStacks();
     renderSystemStatus();
     switchView('stacks');
   } catch (err) {
+    toast(`Import failed: ${err.message}`, 'error');
     els.statusBox.textContent = `Import failed: ${err.message}`;
   }
 }
@@ -664,6 +713,15 @@ setInterval(async () => {
   } catch { /* silent */ }
 }, 30000);
 
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('hs-theme', next);
+  document.getElementById('themeToggle').textContent = next === 'dark' ? '🌙' : '☀️';
+});
+
+initTheme();
 wireNavigation();
 renderUser();
 renderAuthMode();

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,186 +7,206 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="authOverlay" class="auth-overlay">
-    <div class="auth-card panel">
+
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Auth overlay -->
+<div id="authOverlay" class="auth-overlay">
+  <div class="auth-card">
+    <div class="auth-logo">
       <h1>HomeStack</h1>
-      <p class="subtitle">Manage Linux Docker Compose stacks, templates and runtime controls.</p>
-
-      <div id="localAuthBlock">
-        <div class="auth-tabs">
-          <button class="auth-tab active" data-auth-view="login">Login</button>
-          <button class="auth-tab" data-auth-view="register">Create account</button>
-        </div>
-
-        <div id="auth-login" class="auth-view">
-          <label>
-            Username
-            <input id="loginUsername" type="text" autocomplete="username" />
-          </label>
-          <label>
-            Password
-            <input id="loginPassword" type="password" autocomplete="current-password" />
-          </label>
-          <button id="loginBtn" class="primary">Login</button>
-        </div>
-
-        <div id="auth-register" class="auth-view hidden">
-          <label>
-            Username
-            <input id="registerUsername" type="text" autocomplete="username" />
-          </label>
-          <label>
-            Password
-            <input id="registerPassword" type="password" autocomplete="new-password" />
-          </label>
-          <button id="registerBtn" class="primary">Create account</button>
-        </div>
-      </div>
-
-      <div id="ssoAuthBlock" class="hidden">
-        <h2>Authelia SSO enabled</h2>
-        <p class="subtitle">This instance expects authentication from Authelia through a reverse proxy.</p>
-        <div class="button-row">
-          <a id="ssoLoginLink" class="button-link primary" href="/">Open Authelia login</a>
-          <button id="ssoRetryBtn">Retry</button>
-        </div>
-      </div>
-
-      <pre id="authStatus">Create the first account to become admin, or sign in through Authelia if SSO is enabled.</pre>
+      <p>Deploy and manage Docker Compose stacks</p>
     </div>
-  </div>
 
-  <div class="app-shell">
-    <aside class="sidebar">
-      <h1>HomeStack</h1>
-      <p class="subtitle">Deploy, edit and control Linux ready Docker Compose stacks. Pick install paths and connect bind mounts or named volumes.</p>
-      <div class="user-box">
-        <div><strong id="currentUser">Not signed in</strong></div>
-        <div class="hint" id="currentRole">Guest</div>
-        <div class="hint" id="authModeBadge">Auth mode: local</div>
+    <div id="localAuthBlock">
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-auth-view="login">Sign in</button>
+        <button class="auth-tab" data-auth-view="register">Create account</button>
       </div>
-      <nav>
-        <button class="nav-btn active" data-view="deploy">Deploy</button>
-        <button class="nav-btn" data-view="stacks">Stacks</button>
-        <button class="nav-btn" data-view="templates">Template builder</button>
-        <button class="nav-btn" data-view="system">System</button>
-      </nav>
-      <button id="logoutBtn">Log out</button>
-    </aside>
+      <div id="auth-login" class="auth-view">
+        <label>Username
+          <input id="loginUsername" type="text" autocomplete="username" placeholder="your-username" />
+        </label>
+        <label>Password
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" />
+        </label>
+        <button id="loginBtn" class="primary">Sign in</button>
+      </div>
+      <div id="auth-register" class="auth-view hidden">
+        <label>Username
+          <input id="registerUsername" type="text" autocomplete="username" placeholder="choose-a-username" />
+        </label>
+        <label>Password
+          <input id="registerPassword" type="password" autocomplete="new-password" placeholder="min. 8 characters" />
+        </label>
+        <button id="registerBtn" class="primary">Create account</button>
+      </div>
+    </div>
 
-    <main class="content">
-      <section class="panel" id="view-deploy">
-        <div class="panel-header">
-          <h2 id="deployTitle">Deploy a stack</h2>
-          <div class="button-row">
-            <button id="newStackBtn">New stack</button>
-            <button id="refreshAll">Refresh</button>
+    <div id="ssoAuthBlock" class="hidden">
+      <h3 style="margin-bottom:0.4rem">Authelia SSO</h3>
+      <p class="subtitle">Authentication is handled via Authelia through a reverse proxy.</p>
+      <div class="button-row" style="margin-top:1rem">
+        <a id="ssoLoginLink" class="button-link primary" href="/">Open login</a>
+        <button id="ssoRetryBtn">Retry</button>
+      </div>
+    </div>
+
+    <pre id="authStatus">First account becomes admin.</pre>
+  </div>
+</div>
+
+<!-- App -->
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <h1>HomeStack</h1>
+      <p>Docker Compose manager</p>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="nav-btn active" data-view="deploy">
+        <span class="nav-icon">🚀</span> Deploy
+      </button>
+      <button class="nav-btn" data-view="stacks">
+        <span class="nav-icon">📦</span> Stacks
+      </button>
+      <button class="nav-btn" data-view="templates">
+        <span class="nav-icon">🧩</span> Templates
+      </button>
+      <button class="nav-btn" data-view="system">
+        <span class="nav-icon">⚙️</span> System
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-box">
+        <div class="user-box-row">
+          <div class="user-avatar" id="userAvatar">?</div>
+          <div class="user-info">
+            <strong id="currentUser">Not signed in</strong>
+            <span id="currentRole">Guest</span>
           </div>
         </div>
+      </div>
+      <div class="sidebar-actions">
+        <button id="themeToggle" class="theme-toggle" title="Toggle theme">🌙</button>
+        <button id="logoutBtn">Log out</button>
+      </div>
+      <div id="authModeBadge" class="hint" style="text-align:center">Auth mode: local</div>
+    </div>
+  </aside>
 
-        <label>
-          Template
-          <select id="templateSelect"></select>
-        </label>
+  <main class="content">
 
-        <label>
-          Stack name
+    <!-- Deploy -->
+    <section class="panel" id="view-deploy">
+      <div class="panel-header">
+        <h2 id="deployTitle">🚀 Deploy a stack</h2>
+        <div class="button-row">
+          <button id="newStackBtn">New stack</button>
+          <button id="refreshAll">Refresh</button>
+        </div>
+      </div>
+
+      <label>Template
+        <select id="templateSelect"></select>
+      </label>
+
+      <div class="form-grid">
+        <label>Stack name
           <input id="stackName" type="text" placeholder="jellyfin-main" />
         </label>
-
-        <label>
-          Install path
-          <input id="installPath" type="text" placeholder="/opt/homelab/jellyfin-main" />
+        <label>Install path
+          <input id="installPath" type="text" placeholder="/opt/homelab/jellyfin" />
         </label>
+      </div>
 
-        <div id="customComposeField" class="hidden">
-          <label>
-            Docker Compose YAML
-            <textarea id="customCompose" rows="16" spellcheck="false" placeholder="services:&#10;  app:&#10;    image: example/app:latest&#10;    container_name: my-app&#10;    restart: unless-stopped&#10;    ports:&#10;      - &quot;8080:80&quot;"></textarea>
-          </label>
-          <div id="duplicateWarning" class="hidden" style="color:#c0392b;padding:0.5em 0;font-size:0.9em;"></div>
+      <div id="customComposeField" class="hidden">
+        <label>Docker Compose YAML
+          <textarea id="customCompose" rows="14" spellcheck="false"
+            placeholder="services:&#10;  app:&#10;    image: example/app:latest&#10;    container_name: my-app&#10;    restart: unless-stopped&#10;    ports:&#10;      - &quot;8080:80&quot;"></textarea>
+        </label>
+        <div id="duplicateWarning" class="hidden" style="color:var(--danger);font-size:0.82rem;padding:0.25rem 0"></div>
+      </div>
+
+      <div id="dynamicFields" class="grid"></div>
+
+      <div class="subpanel" style="margin-top:0.5rem">
+        <div class="panel-header compact">
+          <h3>Named volume bindings</h3>
+          <span class="hint">Optional — bind a placeholder to an existing Docker volume</span>
         </div>
+        <div id="volumeBindings" class="grid"></div>
+      </div>
 
-        <div id="dynamicFields" class="grid"></div>
+      <div class="button-row" style="margin-top:1rem">
+        <button id="deployBtn" class="primary">🚀 Deploy stack</button>
+        <button id="saveEditBtn" class="hidden primary">💾 Save changes</button>
+      </div>
+      <pre id="statusBox">Ready.</pre>
+    </section>
 
-        <section class="subpanel">
-          <div class="panel-header compact">
-            <h3>Connect existing Docker named volumes</h3>
-            <span class="hint">Optional, pick a named volume for any placeholder key</span>
-          </div>
-          <div id="volumeBindings" class="grid"></div>
-        </section>
-
+    <!-- Stacks -->
+    <section class="panel hidden" id="view-stacks">
+      <div class="panel-header">
+        <h2>📦 Deployed stacks</h2>
         <div class="button-row">
-          <button id="deployBtn" class="primary">Deploy stack</button>
-          <button id="saveEditBtn" class="hidden">Save changes</button>
+          <input id="stackSearch" type="search" placeholder="Search stacks…"
+            style="padding:0.42em 0.75em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.84rem;outline:none;width:180px" />
+          <button id="refreshStacksBtn">Refresh</button>
         </div>
-        <pre id="statusBox">Ready.</pre>
-      </section>
+      </div>
+      <div id="stacksList"></div>
+    </section>
 
-      <section class="panel hidden" id="view-stacks">
-        <div class="panel-header">
-          <h2>Deployed stacks</h2>
-          <div class="button-row">
-            <input id="stackSearch" type="search" placeholder="Search stacks..." style="padding:0.4em 0.6em;border-radius:4px;border:1px solid #444;background:#1a1f2e;color:inherit;font-size:0.9em" />
-            <button id="refreshStacksBtn">Refresh stacks</button>
-          </div>
-        </div>
-        <div id="stacksList"></div>
-      </section>
+    <!-- Template builder -->
+    <section class="panel hidden" id="view-templates">
+      <div class="panel-header">
+        <h2>🧩 Template builder</h2>
+      </div>
+      <div class="form-grid" style="margin-bottom:0.75rem">
+        <label>Template ID
+          <input id="builderId" type="text" placeholder="nextcloud-custom" />
+        </label>
+        <label>Template name
+          <input id="builderName" type="text" placeholder="Nextcloud" />
+        </label>
+      </div>
+      <label>Description
+        <input id="builderDescription" type="text" placeholder="Describe what this stack deploys" />
+      </label>
+      <label>Default install subdirectory
+        <input id="builderSubdir" type="text" placeholder="cloud/nextcloud" />
+      </label>
+      <label>Placeholder keys — one per line
+        <textarea id="builderPlaceholders" rows="5" placeholder="APP_CONFIG_PATH&#10;APP_DATA_PATH"></textarea>
+      </label>
+      <label>Compose template
+        <textarea id="builderCompose" rows="16" spellcheck="false"
+          placeholder="services:&#10;  app:&#10;    image: example/app:latest&#10;    container_name: {{STACK_NAME}}&#10;    volumes:&#10;      - {{APP_CONFIG_PATH}}:/config"></textarea>
+      </label>
+      <div class="button-row">
+        <button id="builderGenerateExample">Insert example</button>
+        <button id="builderSave" class="primary">💾 Save template</button>
+      </div>
+      <pre id="builderStatus">Create reusable deployment templates.</pre>
+    </section>
 
-      <section class="panel hidden" id="view-templates">
-        <div class="panel-header">
-          <h2>Template builder</h2>
-        </div>
-        <div class="grid two-col">
-          <label>
-            Template id
-            <input id="builderId" type="text" placeholder="nextcloud-custom" />
-          </label>
-          <label>
-            Template name
-            <input id="builderName" type="text" placeholder="Nextcloud" />
-          </label>
-        </div>
-        <label>
-          Description
-          <input id="builderDescription" type="text" placeholder="Describe what this stack deploys" />
-        </label>
-        <label>
-          Default install subdirectory
-          <input id="builderSubdir" type="text" placeholder="cloud/nextcloud" />
-        </label>
-        <label>
-          Placeholder keys, one per line
-          <textarea id="builderPlaceholders" rows="6" placeholder="APP_CONFIG_PATH&#10;APP_DATA_PATH"></textarea>
-        </label>
-        <label>
-          Compose template text
-          <textarea id="builderCompose" rows="18" spellcheck="false" placeholder="services:
-  app:
-    image: example/app:latest
-    container_name: {{STACK_NAME}}
-    volumes:
-      - {{APP_CONFIG_PATH}}:/config"></textarea>
-        </label>
-        <div class="button-row">
-          <button id="builderGenerateExample">Insert example</button>
-          <button id="builderSave" class="primary">Save template</button>
-        </div>
-        <pre id="builderStatus">Create reusable deployment templates from the UI.</pre>
-      </section>
+    <!-- System -->
+    <section class="panel hidden" id="view-system">
+      <div class="panel-header">
+        <h2>⚙️ System status</h2>
+        <input id="containerSearch" type="search" placeholder="Search containers…"
+          style="padding:0.42em 0.75em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.84rem;outline:none;width:200px" />
+      </div>
+      <div id="systemStatus"></div>
+    </section>
 
-      <section class="panel hidden" id="view-system">
-        <div class="panel-header">
-          <h2>System status</h2>
-          <input id="containerSearch" type="search" placeholder="Search containers..." style="padding:0.4em 0.6em;border-radius:4px;border:1px solid #444;background:#1a1f2e;color:inherit;font-size:0.9em" />
-        </div>
-        <div id="systemStatus"></div>
-      </section>
-    </main>
-  </div>
+  </main>
+</div>
 
-  <script src="app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
