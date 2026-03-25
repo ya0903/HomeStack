@@ -150,3 +150,15 @@ class TokenResponse(BaseModel):
     ok: bool
     token: str
     user: UserResponse
+
+
+class PluginGitInstallRequest(BaseModel):
+    git_url: str
+
+    @field_validator('git_url')
+    @classmethod
+    def validate_git_url(cls, value: str) -> str:
+        value = value.strip()
+        if not value.startswith(('https://', 'http://', 'git@')):
+            raise ValueError('git_url must start with https://, http://, or git@')
+        return value

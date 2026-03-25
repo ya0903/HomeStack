@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from .auth import (
     authenticate_user,
@@ -30,6 +31,7 @@ from .docker_ops import (
     update_stack,
 )
 from .models import (
+    PluginGitInstallRequest,
     RawDeploymentRequest,
     StackActionRequest,
     StackDeploymentRequest,
@@ -39,6 +41,14 @@ from .models import (
     UserRegisterRequest,
 )
 from .templates import create_custom_template, get_templates
+from .plugin_ops import (
+    get_plugin_asset_path,
+    install_plugin_from_git,
+    install_plugin_from_zip,
+    list_plugins,
+    toggle_plugin,
+    uninstall_plugin,
+)
 
 app = FastAPI(title='HomeStack API', version='0.3.0')
 
@@ -219,3 +229,53 @@ def remove_stack(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ── Plugin endpoints ──────────────────────────────────────────────────────────
+
+@app.get('/api/plugins')
+def get_plugins(user=Depends(get_current_user)) -> list:
+    return list_plugins()
+
+
+@app.post('/api/plugins/install/git')
+def plugin_install_git(request: PluginGitInstallRequest, user=Depends(get_current_user)) -> dict:
+    try:
+        return install_plugin_from_git(request.git_url)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post('/api/plugins/install/zip')
+async def plugin_install_zip(file: UploadFile = File(...), user=Depends(get_current_user)) -> dict:
+    try:
+        content = await file.read()
+        return install_plugin_from_zip(content)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post('/api/plugins/{plugin_id}/toggle')
+def plugin_toggle(plugin_id: str, user=Depends(get_current_user)) -> dict:
+    try:
+        return toggle_plugin(plugin_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete('/api/plugins/{plugin_id}')
+def plugin_uninstall(plugin_id: str, user=Depends(get_current_user)) -> dict:
+    try:
+        uninstall_plugin(plugin_id)
+        return {'ok': True}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get('/api/plugins/{plugin_id}/assets/{filename}')
+def plugin_asset(plugin_id: str, filename: str, user=Depends(get_current_user)):
+    try:
+        path = get_plugin_asset_path(plugin_id, filename)
+        return FileResponse(str(path))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
