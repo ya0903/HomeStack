@@ -703,3 +703,107 @@ def run_stack_action(stack_name: str, action: str) -> Dict[str, object]:
         'message': result.stdout.strip() or f'Stack {action} command completed',
         'runtime': get_stack_runtime_status(stack_name),
     }
+
+
+# ── Image management ───────────────────────────────────────────────────────────
+
+def list_images() -> List[Dict]:
+    if not docker_available():
+        return []
+    result = _run_command(['docker', 'images', '--format', '{{json .}}'])
+    if result.returncode != 0:
+        return []
+    images = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            images.append(json.loads(line))
+        except Exception:
+            continue
+    return images
+
+
+def delete_image(image_ref: str) -> Dict:
+    result = _run_command(['docker', 'rmi', image_ref])
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'Failed to delete image')
+    return {'ok': True, 'output': result.stdout.strip()}
+
+
+# ── Update checks ──────────────────────────────────────────────────────────────
+
+def check_stack_updates(stack_name: str) -> Dict:
+    """Check Docker Hub for newer versions of images used by a stack."""
+    import re
+    compose_path = _stack_compose_path(stack_name)
+    if not compose_path.exists():
+        raise FileNotFoundError(f'Stack {stack_name!r} not found')
+    images = re.findall(r'^\s*image:\s*(.+)$', compose_path.read_text(encoding='utf-8'), re.MULTILINE)
+    images = [img.strip().strip('"\'') for img in images if img.strip()]
+    results = [_check_image_update(img) for img in images]
+    return {'stack_name': stack_name, 'updates': results}
+
+
+def _check_image_update(image: str) -> Dict:
+    import urllib.request as _req
+    import json as _json
+
+    tag = 'latest'
+    if ':' in image.split('/')[-1]:
+        image_name, tag = image.rsplit(':', 1)
+    else:
+        image_name = image
+
+    parts = image_name.split('/')
+    if len(parts) == 1:
+        namespace, repo = 'library', parts[0]
+    elif len(parts) == 2 and '.' not in parts[0]:
+        namespace, repo = parts[0], parts[1]
+    else:
+        return {'image': f'{image_name}:{tag}', 'status': 'skipped', 'reason': 'non-Docker Hub registry'}
+
+    try:
+        local = _run_command(['docker', 'image', 'inspect', f'{image_name}:{tag}', '--format', '{{index .RepoDigests 0}}'])
+        local_digest = ''
+        if local.returncode == 0 and '@' in local.stdout:
+            local_digest = local.stdout.strip().split('@')[1]
+
+        token_resp = _req.urlopen(
+            f'https://auth.docker.io/token?service=registry.docker.io&scope=repository:{namespace}/{repo}:pull',
+            timeout=8,
+        )
+        token = _json.loads(token_resp.read())['token']
+
+        req = _req.Request(
+            f'https://registry-1.docker.io/v2/{namespace}/{repo}/manifests/{tag}',
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/vnd.docker.distribution.manifest.v2+json',
+            },
+        )
+        resp = _req.urlopen(req, timeout=8)
+        remote_digest = resp.headers.get('Docker-Content-Digest', '')
+
+        if not local_digest:
+            status = 'not_pulled'
+        elif not remote_digest:
+            status = 'unknown'
+        elif local_digest == remote_digest:
+            status = 'up_to_date'
+        else:
+            status = 'update_available'
+
+        return {
+            'image': f'{image_name}:{tag}',
+            'status': status,
+            'local_digest': local_digest[:16] + '...' if local_digest else '',
+            'remote_digest': remote_digest[:16] + '...' if remote_digest else '',
+        }
+    except Exception as exc:
+        return {'image': f'{image_name}:{tag}', 'status': 'error', 'error': str(exc)}
+
+
+def get_stack_compose_dir(stack_name: str) -> Path:
+    return _stack_root(stack_name)

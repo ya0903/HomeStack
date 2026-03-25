@@ -1,0 +1,1600 @@
+const API_BASE = '';
+// For local dev with separate servers, set API_BASE = 'http://localhost:8000'
+
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 280);
+  }, 3800);
+}
+
+function initTheme() {
+  const saved = localStorage.getItem('hs-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = saved === 'dark' ? '🌙' : '☀️';
+}
+
+function getUsedHostPorts() {
+  const ports = new Set();
+  state.containers.forEach(c => {
+    for (const m of (c.Ports || '').matchAll(/(?:[\d.]+|:::):(\d+)->/g)) ports.add(m[1]);
+  });
+  return ports;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const state = {
+  templates: [],
+  volumes: [],
+  containers: [],
+  stacks: [],
+  plugins: [],
+  health: null,
+  resources: [],
+  schedules: {},
+  categories: [],
+  pinnedStacks: new Set(JSON.parse(localStorage.getItem('hs-pinned') || '[]')),
+  activeCategoryFilter: '',
+  authConfig: { mode: 'local', login_url: '/', local_auth_enabled: true },
+  token: localStorage.getItem('homeStackToken') || '',
+  user: JSON.parse(localStorage.getItem('homeStackUser') || 'null'),
+  editingStack: null,
+};
+
+function savePinned() {
+  localStorage.setItem('hs-pinned', JSON.stringify([...state.pinnedStacks]));
+}
+
+function togglePin(stackName) {
+  if (state.pinnedStacks.has(stackName)) state.pinnedStacks.delete(stackName);
+  else state.pinnedStacks.add(stackName);
+  savePinned();
+  renderStacks(document.getElementById('stackSearch')?.value || '');
+}
+
+// ── Plugin registry ───────────────────────────────────────────────────────────
+const pluginRegistry = {
+  panels: {},        // id → { title, html }
+  sidebarItems: [],  // { icon, label, panelId }
+  stackActions: [],  // { label, callback }
+  eventListeners: {}, // event → [callback]
+};
+
+const PluginAPI = {
+  /** Register a new full-panel view accessible from the sidebar */
+  registerPanel(id, title, htmlContent) {
+    pluginRegistry.panels[id] = { title, html: htmlContent };
+    const container = document.getElementById('pluginPanels');
+    const existing = document.getElementById(`view-plugin-${id}`);
+    if (existing) existing.remove();
+    const section = document.createElement('section');
+    section.className = 'panel hidden';
+    section.id = `view-plugin-${id}`;
+    section.innerHTML = `<div class="panel-header"><h2>${escapeHtml(title)}</h2></div>${htmlContent}`;
+    container.appendChild(section);
+  },
+
+  /** Add a nav item in the sidebar linking to a registered panel */
+  registerSidebarItem(icon, label, panelId) {
+    pluginRegistry.sidebarItems.push({ icon, label, panelId });
+    const nav = document.querySelector('.sidebar-nav');
+    const btnId = `plugin-nav-${panelId}`;
+    if (document.getElementById(btnId)) return;
+    const btn = document.createElement('button');
+    btn.className = 'nav-btn';
+    btn.id = btnId;
+    btn.dataset.view = `plugin-${panelId}`;
+    btn.innerHTML = `<span class="nav-icon">${icon}</span> ${escapeHtml(label)}`;
+    btn.addEventListener('click', () => switchView(`plugin-${panelId}`));
+    nav.appendChild(btn);
+  },
+
+  /** Add a button to every stack card — callback receives the stack name */
+  registerStackAction(label, callback) {
+    pluginRegistry.stackActions.push({ label, callback });
+  },
+
+  /** Subscribe to app events: stackDeployed, stackDeleted, containerImported */
+  onEvent(event, callback) {
+    if (!pluginRegistry.eventListeners[event]) pluginRegistry.eventListeners[event] = [];
+    pluginRegistry.eventListeners[event].push(callback);
+  },
+
+  /** Make an authenticated API call to the HomeStack backend */
+  fetch(path, options = {}) {
+    return api(path, options);
+  },
+
+  /** Show a toast notification */
+  toast(msg, type = 'info') {
+    toast(msg, type);
+  },
+
+  /** Read current app state (stacks, containers, templates, health) */
+  getState() {
+    return {
+      stacks: state.stacks,
+      containers: state.containers,
+      templates: state.templates,
+      health: state.health,
+      user: state.user,
+    };
+  },
+};
+
+function emitPluginEvent(event, data) {
+  (pluginRegistry.eventListeners[event] || []).forEach(cb => {
+    try { cb(data); } catch { /* plugin error — don't crash the app */ }
+  });
+}
+
+async function loadPlugins() {
+  try {
+    const plugins = await api('/api/plugins');
+    state.plugins = plugins;
+    for (const plugin of plugins) {
+      if (!plugin.enabled) continue;
+      await loadPluginAssets(plugin);
+    }
+    renderPlugins();
+  } catch { /* plugins are non-critical */ }
+}
+
+async function loadPluginAssets(plugin) {
+  try {
+    if (plugin.styles) {
+      const styleId = `plugin-style-${plugin.id}`;
+      if (!document.getElementById(styleId)) {
+        const link = document.createElement('link');
+        link.id = styleId;
+        link.rel = 'stylesheet';
+        link.href = `/api/plugins/${encodeURIComponent(plugin.id)}/assets/${encodeURIComponent(plugin.styles)}`;
+        document.head.appendChild(link);
+      }
+    }
+    if (plugin.entry) {
+      const scriptUrl = `/api/plugins/${encodeURIComponent(plugin.id)}/assets/${encodeURIComponent(plugin.entry)}`;
+      const scriptId = `plugin-script-${plugin.id}`;
+      if (document.getElementById(scriptId)) return;
+      // Use dynamic import so plugins can use ES module syntax
+      const mod = await import(scriptUrl);
+      if (typeof mod.init === 'function') {
+        mod.init(PluginAPI);
+      } else if (typeof mod.default === 'function') {
+        mod.default(PluginAPI);
+      }
+      // Mark as loaded
+      const marker = document.createElement('meta');
+      marker.id = scriptId;
+      document.head.appendChild(marker);
+    }
+  } catch (err) {
+    console.warn(`[HomeStack] Failed to load plugin "${plugin.id}":`, err);
+  }
+}
+
+const els = {
+  authOverlay: document.getElementById('authOverlay'),
+  authStatus: document.getElementById('authStatus'),
+  loginUsername: document.getElementById('loginUsername'),
+  loginPassword: document.getElementById('loginPassword'),
+  registerUsername: document.getElementById('registerUsername'),
+  registerPassword: document.getElementById('registerPassword'),
+  templateSelect: document.getElementById('templateSelect'),
+  stackName: document.getElementById('stackName'),
+  installPath: document.getElementById('installPath'),
+  dynamicFields: document.getElementById('dynamicFields'),
+  volumeBindings: document.getElementById('volumeBindings'),
+  statusBox: document.getElementById('statusBox'),
+  stacksList: document.getElementById('stacksList'),
+  systemStatus: document.getElementById('systemStatus'),
+  currentUser: document.getElementById('currentUser'),
+  currentRole: document.getElementById('currentRole'),
+  authModeBadge: document.getElementById('authModeBadge'),
+  deployBtn: document.getElementById('deployBtn'),
+  saveEditBtn: document.getElementById('saveEditBtn'),
+  deployTitle: document.getElementById('deployTitle'),
+  builderStatus: document.getElementById('builderStatus'),
+  localAuthBlock: document.getElementById('localAuthBlock'),
+  ssoAuthBlock: document.getElementById('ssoAuthBlock'),
+  ssoLoginLink: document.getElementById('ssoLoginLink'),
+  ssoRetryBtn: document.getElementById('ssoRetryBtn'),
+};
+
+async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (state.authConfig.mode === 'local' && state.token) headers.Authorization = `Bearer ${state.token}`;
+  if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' });
+  let payload;
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) payload = await res.json();
+  else payload = await res.text();
+  if (!res.ok) {
+    const message = typeof payload === 'string' ? payload : payload.detail || JSON.stringify(payload);
+    throw new Error(message);
+  }
+  return payload;
+}
+
+function setAuth(token, user) {
+  state.token = token;
+  state.user = user;
+  localStorage.setItem('homeStackToken', token);
+  localStorage.setItem('homeStackUser', JSON.stringify(user));
+  renderUser();
+  els.authOverlay.classList.add('hidden');
+}
+
+function clearAuth() {
+  state.token = '';
+  state.user = null;
+  localStorage.removeItem('homeStackToken');
+  localStorage.removeItem('homeStackUser');
+  renderUser();
+  if (state.authConfig.mode === 'local') els.authOverlay.classList.remove('hidden');
+  else {
+    els.authOverlay.classList.remove('hidden');
+    els.authStatus.textContent = 'Authelia session required. Use the SSO button and then retry.';
+  }
+}
+
+function renderUser() {
+  const u = state.user;
+  els.currentUser.textContent = u ? u.username : 'Not signed in';
+  els.currentRole.textContent = u ? u.role : 'Guest';
+  els.authModeBadge.textContent = `Auth mode: ${state.authConfig.mode}`;
+  const avatar = document.getElementById('userAvatar');
+  if (avatar) avatar.textContent = u ? u.username.slice(0, 2).toUpperCase() : '?';
+}
+
+function renderAuthMode() {
+  const isLocal = state.authConfig.mode === 'local';
+  els.localAuthBlock.classList.toggle('hidden', !isLocal);
+  els.ssoAuthBlock.classList.toggle('hidden', isLocal);
+  els.ssoLoginLink.href = state.authConfig.login_url || '/';
+}
+
+function activeTemplate() {
+  return state.templates.find(t => t.id === els.templateSelect.value);
+}
+
+function renderTemplates() {
+  const customOpt = '<option value="__custom__">-- Custom (paste docker-compose) --</option>';
+  els.templateSelect.innerHTML = customOpt + state.templates
+    .map(t => `<option value="${t.id}">${t.name} (${t.source})</option>`)
+    .join('');
+  if (!els.templateSelect.value) {
+    els.templateSelect.value = '__custom__';
+  }
+  if (!state.editingStack) applyTemplateDefaults();
+}
+
+function applyTemplateDefaults() {
+  const tpl = activeTemplate();
+  if (tpl) {
+    els.stackName.placeholder = tpl.id;
+    els.installPath.placeholder = `/opt/homelab/${tpl.default_install_subdir}`;
+    if (!els.stackName.value) els.stackName.value = tpl.id;
+    if (!els.installPath.value) els.installPath.value = `/opt/homelab/${tpl.default_install_subdir}`;
+  } else {
+    els.stackName.placeholder = 'my-stack';
+    els.installPath.placeholder = '/opt/homelab/my-stack';
+  }
+  renderDynamicFields();
+}
+
+function renderDynamicFields(existing = {}) {
+  const isCustom = els.templateSelect.value === '__custom__';
+  document.getElementById('customComposeField').classList.toggle('hidden', !isCustom);
+
+  const tpl = activeTemplate();
+  if (!tpl || isCustom) {
+    els.dynamicFields.innerHTML = '';
+    els.volumeBindings.innerHTML = '';
+    return;
+  }
+
+  els.dynamicFields.innerHTML = tpl.required_placeholders.map(key => {
+    const suffix = key.replace(/^[A-Z]+_/, '').toLowerCase();
+    const suggested = existing.placeholders?.[key] || `${els.installPath.value}/${suffix}`;
+    return `
+      <label>
+        ${key}
+        <input data-placeholder-key="${key}" type="text" value="${suggested}" />
+      </label>
+    `;
+  }).join('');
+
+  const volumeOptions = ['<option value="">No named volume</option>']
+    .concat(state.volumes.map(v => `<option value="${v.name}">${v.name}</option>`));
+
+  els.volumeBindings.innerHTML = tpl.required_placeholders.map(key => `
+    <label>
+      ${key}
+      <select data-volume-key="${key}">
+        ${volumeOptions.join('')}
+      </select>
+    </label>
+  `).join('');
+
+  if (existing.named_volume_bindings) {
+    document.querySelectorAll('[data-volume-key]').forEach(select => {
+      const value = existing.named_volume_bindings[select.dataset.volumeKey] || '';
+      select.value = value;
+    });
+  }
+}
+
+function collectPayload() {
+  const tpl = activeTemplate();
+  const placeholders = {};
+  document.querySelectorAll('[data-placeholder-key]').forEach(input => {
+    placeholders[input.dataset.placeholderKey] = input.value.trim();
+  });
+  const namedVolumeBindings = {};
+  document.querySelectorAll('[data-volume-key]').forEach(select => {
+    if (select.value) namedVolumeBindings[select.dataset.volumeKey] = select.value;
+  });
+  return {
+    template_id: tpl.id,
+    stack_name: els.stackName.value.trim(),
+    install_path: els.installPath.value.trim(),
+    placeholders,
+    named_volume_bindings: namedVolumeBindings,
+  };
+}
+
+function extractStackPorts(containers) {
+  const seen = new Set();
+  const ports = [];
+  for (const c of containers) {
+    // docker compose ps format: Publishers array
+    if (Array.isArray(c.Publishers)) {
+      for (const p of c.Publishers) {
+        if (p.PublishedPort) {
+          const label = `${p.PublishedPort}→${p.TargetPort}`;
+          if (!seen.has(label)) { seen.add(label); ports.push(label); }
+        }
+      }
+    }
+    // fallback docker ps format: Ports string e.g. "0.0.0.0:8080->80/tcp"
+    if (typeof c.Ports === 'string' && c.Ports) {
+      for (const m of c.Ports.matchAll(/(?:[\d.]+|:::):(\d+)->(\d+)/g)) {
+        const label = `${m[1]}→${m[2]}`;
+        if (!seen.has(label)) { seen.add(label); ports.push(label); }
+      }
+    }
+  }
+  return ports;
+}
+
+function renderCategoryTabs() {
+  const tabs = document.getElementById('categoryTabs');
+  if (!tabs) return;
+  const all = ['', ...state.categories];
+  tabs.innerHTML = all.map(cat => {
+    const active = state.activeCategoryFilter === cat;
+    return `<button class="cat-tab${active ? ' active' : ''}" data-cat="${escapeHtml(cat)}">${cat || 'All'}</button>`;
+  }).join('');
+}
+
+function renderStacks(filter = '') {
+  renderCategoryTabs();
+  const term = filter.toLowerCase();
+  let filtered = term
+    ? state.stacks.filter(s => s.stack_name.toLowerCase().includes(term) || (s.template_id || '').toLowerCase().includes(term))
+    : state.stacks;
+
+  if (state.activeCategoryFilter) {
+    filtered = filtered.filter(s => (s.category || '') === state.activeCategoryFilter);
+  }
+
+  // Pinned stacks first
+  filtered = [
+    ...filtered.filter(s => state.pinnedStacks.has(s.stack_name)),
+    ...filtered.filter(s => !state.pinnedStacks.has(s.stack_name)),
+  ];
+
+  if (!filtered.length) {
+    els.stacksList.innerHTML = `<div class="card">${term ? 'No stacks match your search.' : 'No stacks deployed yet.'}</div>`;
+    return;
+  }
+
+  els.stacksList.innerHTML = filtered.map(stack => {
+    const containers = stack.runtime?.containers || [];
+    const running = stack.runtime?.running;
+    const name = escapeHtml(stack.stack_name);
+    const rawName = stack.stack_name;
+    const dotClass = running ? 'dot-success' : (stack.runtime?.available === false ? 'dot-muted' : 'dot-danger');
+    const badgeClass = running ? 'badge-success' : 'badge-danger';
+    const summary = escapeHtml(stack.runtime?.summary || 'Unknown');
+    const pinned = state.pinnedStacks.has(rawName);
+    const category = escapeHtml(stack.category || '');
+
+    const cTags = containers.map(c => {
+      const cState = String(c.State || '').toLowerCase();
+      return `<span class="container-tag ${cState === 'running' ? 'tag-ok' : 'tag-stopped'}">${escapeHtml(c.Service || c.Name || 'container')}</span>`;
+    }).join('') || '';
+
+    const ports = extractStackPorts(containers);
+    const portTags = ports.map(p => `<span class="port-tag">${escapeHtml(p)}</span>`).join('');
+
+    // Resource usage for containers in this stack
+    const res = state.resources.filter(r => containers.some(c =>
+      (c.Name || c.Service || '').replace(/^\//, '') === (r.Name || '').replace(/^\//, '')
+    ));
+    const resHtml = res.map(r => `
+      <span class="res-tag" title="${escapeHtml(r.Name || '')}">
+        ${escapeHtml(r.CPUPerc || '?')} CPU · ${escapeHtml(r.MemUsage || '?')}
+      </span>`).join('');
+
+    const schedule = state.schedules[rawName];
+    const schedBadge = schedule?.enabled
+      ? `<span class="badge badge-muted" title="Scheduled restart: ${escapeHtml(schedule.cron)}">⏰ ${escapeHtml(schedule.cron)}</span>`
+      : '';
+
+    return `
+      <div class="stack-card${pinned ? ' stack-pinned' : ''}">
+        <div class="stack-card-header">
+          <div class="stack-card-title">
+            <span class="status-dot ${dotClass}"></span>
+            <strong>${name}</strong>
+            <span class="badge ${badgeClass}">${summary}</span>
+            ${portTags ? `<span class="port-tags">${portTags}</span>` : ''}
+            ${schedBadge}
+            <button class="pin-btn${pinned ? ' pinned' : ''}" data-action="pin" data-stack-name="${name}" title="${pinned ? 'Unpin' : 'Pin to top'}">📌</button>
+          </div>
+          <div class="stack-card-meta">
+            ${category ? `<span class="meta-item cat-badge">${category}</span>` : ''}
+            <span class="meta-item">🧩 ${escapeHtml(stack.template_id || 'custom')}</span>
+            <span class="meta-item">📁 ${escapeHtml(stack.install_path || '—')}</span>
+            <span class="meta-item" id="disk-${name}">
+              <button class="btn-ghost btn-xs" data-action="diskusage" data-stack-name="${name}">Check disk</button>
+            </span>
+            ${resHtml}
+          </div>
+          <div class="stack-health-row">
+            <span id="health-${name}" class="health-badge health-unknown" data-action="healthcheck" data-stack-name="${name}" style="cursor:pointer" title="Click to run health check">⬤ Health</span>
+            <select class="cat-select btn-xs" data-action="setcategory" data-stack-name="${name}" title="Set category">
+              <option value="">No category</option>
+              ${state.categories.map(c => `<option value="${escapeHtml(c)}"${stack.category === c ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+              <option value="__new__">+ New category…</option>
+            </select>
+            <input class="schedule-input" id="sched-${name}" type="text" placeholder="cron (e.g. 0 3 * * *)" value="${escapeHtml(schedule?.cron || '')}" style="width:140px;font-size:0.75rem" />
+            <button class="btn-ghost btn-xs" data-action="saveschedule" data-stack-name="${name}">Set schedule</button>
+            ${schedule ? `<button class="btn-ghost btn-xs" data-action="delschedule" data-stack-name="${name}">Clear</button>` : ''}
+          </div>
+          ${cTags ? `<div class="container-tags">${cTags}</div>` : ''}
+        </div>
+        <div class="stack-card-actions">
+          <button class="btn-sm" data-action="edit" data-stack-name="${name}">Edit</button>
+          <button class="btn-sm btn-success" data-action="start" data-stack-name="${name}">▶ Start</button>
+          <button class="btn-sm btn-warning" data-action="stop" data-stack-name="${name}">⏹ Stop</button>
+          <button class="btn-sm" data-action="restart" data-stack-name="${name}">↺ Restart</button>
+          <button class="btn-sm btn-accent" data-action="update" data-stack-name="${name}">⬆ Pull</button>
+          <button class="btn-sm btn-ghost" data-action="checkupdate" data-stack-name="${name}">🔍 Updates</button>
+          <button class="btn-sm btn-ghost" data-action="fetchlogs" data-stack-name="${name}">📋 Logs</button>
+          <button class="btn-sm btn-danger" data-action="delete" data-stack-name="${name}">🗑 Delete</button>
+          <span id="update-${name}" class="badge badge-muted" style="display:none"></span>
+        </div>
+        <details class="stack-logs">
+          <summary>
+            Logs
+            <button class="btn-xs btn-ghost" id="livebtn-${name}" data-action="livelog" data-stack-name="${name}" style="margin-left:0.5rem">⚡ Live</button>
+          </summary>
+          <pre id="logs-${name}">Click Logs for last output, or Live to stream.</pre>
+        </details>
+      </div>
+    `;
+  }).join('');
+
+  // Run health checks for all stacks non-blocking
+  filtered.forEach(stack => runHealthCheckUI(stack.stack_name));
+}
+
+async function refreshStacks() {
+  const [stacks, schedules, categories] = await Promise.all([
+    api('/api/stacks'),
+    api('/api/schedules').catch(() => ({})),
+    api('/api/categories').catch(() => []),
+  ]);
+  state.stacks = stacks.map(s => ({ ...s, category: s.category || '' }));
+  state.schedules = schedules;
+  state.categories = categories;
+  renderStacks(document.getElementById('stackSearch')?.value || '');
+}
+
+els.stacksList.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action;
+  const stackName = el.dataset.stackName;
+  if (action === 'edit') await editStack(stackName);
+  else if (action === 'logs') await viewLogs(stackName);
+  else if (action === 'delete') await deleteStack(stackName);
+  else if (action === 'update') await pullAndRedeployStack(stackName);
+  else if (action === 'diskusage') await checkDiskUsage(stackName);
+  else if (action === 'pin') togglePin(stackName);
+  else if (action === 'healthcheck') await promptHealthConfig(stackName);
+  else if (action === 'saveschedule') await saveSchedule(stackName);
+  else if (action === 'delschedule') await deleteSchedule(stackName);
+  else if (action === 'checkupdate') { document.getElementById(`update-${stackName}`)?.style.removeProperty('display'); await checkStackUpdates(stackName); }
+  else if (action === 'fetchlogs') await viewLogs(stackName);
+  else if (action === 'livelog') startLiveLog(stackName);
+  else if (action === 'stoplogs') stopLiveLog(stackName);
+  else await stackAction(stackName, action);
+});
+
+els.stacksList.addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-action="setcategory"]');
+  if (!sel) return;
+  await setCategory(sel.dataset.stackName, sel.value);
+});
+
+document.getElementById('categoryTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.cat-tab');
+  if (!btn) return;
+  state.activeCategoryFilter = btn.dataset.cat;
+  renderStacks(document.getElementById('stackSearch')?.value || '');
+});
+
+function renderSystemStatus() {
+  if (!state.health) return;
+  const dockerOk = state.health.docker_available;
+  const composeOk = state.health.compose_available;
+  const term = (document.getElementById('containerSearch')?.value || '').toLowerCase();
+  const filtered = term
+    ? state.containers.filter(c =>
+        (c.Names || c.Name || '').toLowerCase().includes(term) ||
+        (c.Image || '').toLowerCase().includes(term))
+    : state.containers;
+
+  const containerRows = filtered.map(c => {
+    const rawName = (c.Names || c.Name || '').replace(/^\//, '');
+    const name = escapeHtml(rawName);
+    const image = escapeHtml(c.Image || '');
+    const status = escapeHtml(c.State || c.Status || '');
+    const ports = escapeHtml(c.Ports || '');
+    const stateClass = (c.State || '').toLowerCase() === 'running' ? 'ok' : 'danger';
+    const managed = state.stacks.some(s => s.stack_name === rawName);
+    const importBtn = managed
+      ? '<span class="hint">Managed</span>'
+      : `<button class="small" data-action="import" data-container-name="${name}">Import</button>`;
+    const res = state.resources.find(r => (r.Name || '').replace(/^\//, '') === rawName) || {};
+    const cpu = escapeHtml(res.CPUPerc || '—');
+    const mem = escapeHtml(res.MemUsage || '—');
+    return `<tr>
+      <td style="padding:0.3em 0.6em">${name}</td>
+      <td style="padding:0.3em 0.6em">${image}</td>
+      <td style="padding:0.3em 0.6em" class="${stateClass}">${status}</td>
+      <td style="padding:0.3em 0.6em">${ports}</td>
+      <td style="padding:0.3em 0.6em;font-size:0.75rem">
+        <span>${cpu}</span> · <span>${mem}</span>
+        <canvas data-sparkline="${rawName}" width="60" height="20" style="vertical-align:middle;margin-left:4px"></canvas>
+      </td>
+      <td style="padding:0.3em 0.6em">${importBtn}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="5" class="hint" style="padding:0.6em">${term ? 'No containers match search.' : 'No containers found (Docker may be unavailable)'}</td></tr>`;
+
+  els.systemStatus.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Docker</div>
+        <div class="stat-value ${dockerOk ? 'ok' : 'danger'}">${dockerOk ? '✓' : '✗'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Compose</div>
+        <div class="stat-value ${composeOk ? 'ok' : 'danger'}">${composeOk ? '✓' : '✗'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Auth mode</div>
+        <div class="stat-value" style="font-size:1rem">${escapeHtml(state.authConfig.mode)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Volumes</div>
+        <div class="stat-value">${state.volumes.length}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Templates</div>
+        <div class="stat-value">${state.templates.length}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Containers</div>
+        <div class="stat-value">${state.containers.length}</div>
+      </div>
+    </div>
+    <h3 style="margin-bottom:0.6rem">All containers on this host${term ? ` — ${filtered.length} shown` : ` (${filtered.length})`}</h3>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr>
+          <th>Name</th><th>Image</th><th>State</th><th>Ports</th><th>CPU / Memory</th><th>Actions</th>
+        </tr></thead>
+        <tbody>${containerRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function refreshAll() {
+  els.statusBox.textContent = 'Refreshing data...';
+  try {
+    const [health, templates, volumes, containers, resources] = await Promise.all([
+      api('/api/health'),
+      api('/api/templates'),
+      api('/api/volumes'),
+      api('/api/containers'),
+      api('/api/resources').catch(() => []),
+    ]);
+    state.health = health;
+    state.templates = templates;
+    state.volumes = volumes;
+    state.containers = containers;
+    state.resources = resources;
+    renderTemplates();
+    renderDynamicFields();
+    renderSystemStatus();
+    await Promise.all([refreshStacks(), loadResourceHistory()]);
+    renderSparklines();
+    await loadPlugins();
+    els.statusBox.textContent = 'Ready.';
+  } catch (err) {
+    if (state.authConfig.mode === 'local' && String(err.message).toLowerCase().includes('token')) clearAuth();
+    els.statusBox.textContent = `Refresh failed: ${err.message}`;
+  }
+}
+
+async function deployStack() {
+  if (els.templateSelect.value === '__custom__') {
+    const composeContent = document.getElementById('customCompose').value.trim();
+    const stackName = els.stackName.value.trim();
+    const installPath = els.installPath.value.trim();
+    if (!composeContent) { els.statusBox.textContent = 'Paste docker-compose content first.'; return; }
+    if (!stackName) { els.statusBox.textContent = 'Stack name is required.'; return; }
+    if (!installPath) { els.statusBox.textContent = 'Install path is required.'; return; }
+    const usedPorts = getUsedHostPorts();
+    const conflicts = [...composeContent.matchAll(/"(\d+):\d+"/g)].map(m => m[1]).filter(p => usedPorts.has(p));
+    if (conflicts.length && !confirm(`Port(s) ${conflicts.join(', ')} are already in use by other containers. Deploy anyway?`)) return;
+    els.statusBox.textContent = 'Deploying custom stack...';
+    try {
+      const data = await api('/api/deploy/raw', {
+        method: 'POST',
+        body: JSON.stringify({ stack_name: stackName, install_path: installPath, compose_content: composeContent }),
+      });
+      els.statusBox.textContent = JSON.stringify(data, null, 2);
+      emitPluginEvent('stackDeployed', data);
+      await refreshStacks();
+    } catch (err) {
+      els.statusBox.textContent = `Deploy failed: ${err.message}`;
+    }
+    return;
+  }
+  const payload = collectPayload();
+  els.statusBox.textContent = 'Deploying stack...';
+  try {
+    const data = await api('/api/deploy', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    els.statusBox.textContent = JSON.stringify(data, null, 2);
+    emitPluginEvent('stackDeployed', data);
+    await refreshStacks();
+  } catch (err) {
+    els.statusBox.textContent = `Deploy failed: ${err.message}`;
+  }
+}
+
+async function saveEdit() {
+  if (!state.editingStack) return;
+  const payload = collectPayload();
+  els.statusBox.textContent = `Saving changes to ${state.editingStack}...`;
+  try {
+    const data = await api(`/api/stacks/${state.editingStack}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    els.statusBox.textContent = JSON.stringify(data, null, 2);
+    await refreshStacks();
+  } catch (err) {
+    els.statusBox.textContent = `Save failed: ${err.message}`;
+  }
+}
+
+// ── Image manager ─────────────────────────────────────────────────────────────
+
+async function loadImages() {
+  const list = document.getElementById('imagesList');
+  if (!list) return;
+  list.innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const images = await api('/api/images');
+    if (!images.length) { list.innerHTML = '<p class="hint">No images found.</p>'; return; }
+    list.innerHTML = `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Repository</th><th>Tag</th><th>Image ID</th><th>Size</th><th>Created</th><th></th></tr></thead>
+          <tbody>${images.map(img => `
+            <tr>
+              <td>${escapeHtml(img.Repository || '<none>')}</td>
+              <td>${escapeHtml(img.Tag || '<none>')}</td>
+              <td style="font-family:monospace;font-size:0.75rem">${escapeHtml((img.ID || '').slice(0, 17))}</td>
+              <td>${escapeHtml(img.Size || '')}</td>
+              <td>${escapeHtml(img.CreatedSince || img.CreatedAt || '')}</td>
+              <td><button class="btn-xs btn-danger" data-img-action="delete" data-img-ref="${escapeHtml(img.ID || '')}" title="Delete image">🗑</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (err) {
+    list.innerHTML = `<p class="hint">Error: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function deleteImage(ref) {
+  if (!confirm(`Delete image ${ref.slice(0, 20)}…? Containers using it must be stopped first.`)) return;
+  try {
+    await api(`/api/images?ref=${encodeURIComponent(ref)}`, { method: 'DELETE' });
+    toast('Image deleted.', 'success');
+    await loadImages();
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Update checks ─────────────────────────────────────────────────────────────
+
+async function checkStackUpdates(stackName) {
+  const badge = document.getElementById(`update-${stackName}`);
+  if (badge) badge.textContent = '⏳ Checking…';
+  try {
+    const data = await api(`/api/stacks/${encodeURIComponent(stackName)}/update-check`);
+    const updates = data.updates || [];
+    const available = updates.filter(u => u.status === 'update_available');
+    if (badge) {
+      if (available.length) {
+        badge.textContent = `⬆ ${available.length} update${available.length > 1 ? 's' : ''}`;
+        badge.className = 'badge badge-warning';
+      } else {
+        badge.textContent = '✓ Up to date';
+        badge.className = 'badge badge-success';
+      }
+    }
+    const details = updates.map(u => `${u.image}: ${u.status}${u.error ? ' — ' + u.error : ''}`).join('\n');
+    toast(`Update check for ${stackName}:\n${details}`, available.length ? 'warning' : 'success');
+  } catch (err) {
+    if (badge) badge.textContent = '? Check failed';
+    toast(`Update check failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Live log streaming ────────────────────────────────────────────────────────
+
+const _logStreams = {};
+
+function startLiveLog(stackName) {
+  stopLiveLog(stackName);
+  const logEl = document.getElementById(`logs-${stackName}`);
+  const btn = document.getElementById(`livebtn-${stackName}`);
+  if (!logEl) return;
+  logEl.textContent = 'Connecting to live stream…\n';
+
+  const tokenParam = state.authConfig.mode === 'local' && state.token
+    ? `?token=${encodeURIComponent(state.token)}`
+    : '';
+  const es = new EventSource(`${API_BASE}/api/stacks/${encodeURIComponent(stackName)}/logs/stream${tokenParam}`);
+  _logStreams[stackName] = es;
+  if (btn) { btn.textContent = '■ Stop'; btn.dataset.action = 'stoplogs'; }
+
+  es.onmessage = (e) => {
+    if (e.data === '[heartbeat]') return;
+    if (logEl) {
+      logEl.textContent += e.data + '\n';
+      const lines = logEl.textContent.split('\n');
+      if (lines.length > 300) logEl.textContent = lines.slice(-300).join('\n');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  };
+  es.onerror = () => {
+    if (logEl) logEl.textContent += '\n[Stream closed]\n';
+    stopLiveLog(stackName);
+  };
+}
+
+function stopLiveLog(stackName) {
+  if (_logStreams[stackName]) {
+    _logStreams[stackName].close();
+    delete _logStreams[stackName];
+  }
+  const btn = document.getElementById(`livebtn-${stackName}`);
+  if (btn) { btn.textContent = '⚡ Live'; btn.dataset.action = 'livelog'; }
+}
+
+// ── Resource history / sparklines ─────────────────────────────────────────────
+
+let _resourceHistory = [];
+
+async function loadResourceHistory() {
+  try {
+    _resourceHistory = await api('/api/resources/history');
+  } catch { _resourceHistory = []; }
+}
+
+function getSparklineValues(containerName, field = 'CPUPerc') {
+  return _resourceHistory.map(snap => {
+    const entry = (snap.data || []).find(r => (r.Name || '').replace(/^\//, '') === containerName.replace(/^\//, ''));
+    if (!entry) return 0;
+    return parseFloat((entry[field] || '0').replace('%', '')) || 0;
+  });
+}
+
+function drawSparkline(canvas, values, color = '#5c7cfa') {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  if (values.length < 2) return;
+  const max = Math.max(...values, 0.1);
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  values.forEach((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - (v / max) * (h - 2) - 1;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function renderSparklines() {
+  document.querySelectorAll('canvas[data-sparkline]').forEach(canvas => {
+    const name = canvas.dataset.sparkline;
+    const values = getSparklineValues(name);
+    drawSparkline(canvas, values);
+  });
+}
+
+// ── User management ───────────────────────────────────────────────────────────
+
+async function loadUsers() {
+  const list = document.getElementById('usersList');
+  const status = document.getElementById('userMgmtStatus');
+  const panel = document.getElementById('userMgmtPanel');
+  if (!list) return;
+  if (!state.user || state.user.role !== 'admin') {
+    if (panel) panel.classList.add('hidden');
+    return;
+  }
+  if (panel) panel.classList.remove('hidden');
+  try {
+    const users = await api('/api/users');
+    list.innerHTML = users.map(u => `
+      <div class="user-row">
+        <span class="user-row-name">${escapeHtml(u.username)}</span>
+        <select class="btn-xs" data-user-action="setrole" data-username="${escapeHtml(u.username)}">
+          <option value="admin"${u.role === 'admin' ? ' selected' : ''}>Admin</option>
+          <option value="user"${u.role === 'user' ? ' selected' : ''}>Viewer</option>
+        </select>
+        ${u.username !== state.user.username
+          ? `<button class="btn-xs btn-danger" data-user-action="delete" data-username="${escapeHtml(u.username)}">Remove</button>`
+          : '<span class="hint">(you)</span>'}
+      </div>`).join('');
+    if (status) status.textContent = `${users.length} user${users.length !== 1 ? 's' : ''}.`;
+  } catch (err) {
+    if (status) status.textContent = `Load failed: ${err.message}`;
+  }
+}
+
+async function createUser() {
+  const username = document.getElementById('newUserUsername').value.trim();
+  const password = document.getElementById('newUserPassword').value;
+  const role = document.getElementById('newUserRole').value;
+  const status = document.getElementById('userMgmtStatus');
+  if (!username || !password) { status.textContent = 'Fill in username and password.'; return; }
+  try {
+    await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    if (role === 'admin') {
+      await api(`/api/users/${encodeURIComponent(username)}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: 'admin' }),
+      });
+    }
+    document.getElementById('newUserUsername').value = '';
+    document.getElementById('newUserPassword').value = '';
+    toast(`User "${username}" created.`, 'success');
+    await loadUsers();
+  } catch (err) {
+    status.textContent = `Failed: ${err.message}`;
+  }
+}
+
+// ── Health checks ─────────────────────────────────────────────────────────────
+
+async function runHealthCheckUI(stackName) {
+  const el = document.getElementById(`health-${stackName}`);
+  if (!el) return;
+  try {
+    const data = await api(`/api/stacks/${encodeURIComponent(stackName)}/health`);
+    if (!data.configured) {
+      el.className = 'health-badge health-unknown';
+      el.title = 'No health check configured — click to set one';
+      el.textContent = '⬤ Health';
+    } else if (data.ok) {
+      el.className = 'health-badge health-ok';
+      el.title = `Healthy — ${data.elapsed_ms}ms (HTTP ${data.status})`;
+      el.textContent = '⬤ Healthy';
+    } else {
+      el.className = 'health-badge health-fail';
+      el.title = data.error || `HTTP ${data.status} (expected ${data.expected_status})`;
+      el.textContent = '⬤ Unhealthy';
+    }
+  } catch { /* ignore */ }
+}
+
+async function promptHealthConfig(stackName) {
+  const url = prompt(`Health check URL for "${stackName}":\n(leave empty to remove)`,
+    document.getElementById(`health-${stackName}`)?.dataset?.url || '');
+  if (url === null) return;
+  if (!url.trim()) {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/health`, { method: 'DELETE' });
+    toast('Health check removed.', 'info');
+  } else {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/health`, {
+      method: 'PUT',
+      body: JSON.stringify({ url: url.trim() }),
+    });
+    toast('Health check saved.', 'success');
+  }
+  runHealthCheckUI(stackName);
+}
+
+// ── Schedule ──────────────────────────────────────────────────────────────────
+
+async function saveSchedule(stackName) {
+  const input = document.getElementById(`sched-${stackName}`);
+  const cron = input?.value.trim();
+  if (!cron) { toast('Enter a cron expression first.', 'error'); return; }
+  try {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/schedule`, {
+      method: 'PUT',
+      body: JSON.stringify({ cron, enabled: true }),
+    });
+    toast(`Schedule set for ${stackName}.`, 'success');
+    await refreshStacks();
+  } catch (err) {
+    toast(`Schedule failed: ${err.message}`, 'error');
+  }
+}
+
+async function deleteSchedule(stackName) {
+  try {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/schedule`, { method: 'DELETE' });
+    toast(`Schedule cleared for ${stackName}.`, 'info');
+    await refreshStacks();
+  } catch (err) {
+    toast(`Failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Categories ────────────────────────────────────────────────────────────────
+
+async function setCategory(stackName, category) {
+  if (category === '__new__') {
+    const newCat = prompt('New category name:');
+    if (!newCat?.trim()) return;
+    category = newCat.trim();
+  }
+  try {
+    await api(`/api/stacks/${encodeURIComponent(stackName)}/category`, {
+      method: 'PUT',
+      body: JSON.stringify({ category }),
+    });
+    await refreshStacks();
+  } catch (err) {
+    toast(`Failed: ${err.message}`, 'error');
+  }
+}
+
+// ── Notifications settings ────────────────────────────────────────────────────
+
+async function loadNotifSettings() {
+  const status = document.getElementById('notifStatus');
+  try {
+    const data = await api('/api/settings/notifications');
+    document.getElementById('notifDiscord').value = data.discord_webhook || '';
+    document.getElementById('notifNtfy').value = data.ntfy_url || '';
+    document.getElementById('notifWebhook').value = data.webhook_url || '';
+    document.getElementById('notifEnabled').checked = !!data.enabled;
+    document.querySelectorAll('.notif-event').forEach(cb => {
+      cb.checked = (data.events || []).includes(cb.value);
+    });
+    status.textContent = 'Settings loaded.';
+  } catch (err) {
+    status.textContent = `Load failed: ${err.message}`;
+  }
+}
+
+async function saveNotifSettings() {
+  const status = document.getElementById('notifStatus');
+  const events = [...document.querySelectorAll('.notif-event:checked')].map(cb => cb.value);
+  try {
+    await api('/api/settings/notifications', {
+      method: 'PUT',
+      body: JSON.stringify({
+        discord_webhook: document.getElementById('notifDiscord').value.trim(),
+        ntfy_url: document.getElementById('notifNtfy').value.trim(),
+        webhook_url: document.getElementById('notifWebhook').value.trim(),
+        enabled: document.getElementById('notifEnabled').checked,
+        events,
+      }),
+    });
+    toast('Notification settings saved.', 'success');
+    status.textContent = 'Saved.';
+  } catch (err) {
+    status.textContent = `Save failed: ${err.message}`;
+  }
+}
+
+async function testNotification() {
+  const status = document.getElementById('notifStatus');
+  try {
+    await api('/api/settings/notifications/test', { method: 'POST' });
+    toast('Test notification sent.', 'success');
+    status.textContent = 'Test sent — check your configured channels.';
+  } catch (err) {
+    status.textContent = `Test failed: ${err.message}`;
+  }
+}
+
+// ── Backup / Restore ──────────────────────────────────────────────────────────
+
+async function downloadBackup() {
+  const status = document.getElementById('backupStatus');
+  status.textContent = 'Creating backup…';
+  try {
+    const headers = {};
+    if (state.authConfig.mode === 'local' && state.token) headers.Authorization = `Bearer ${state.token}`;
+    const res = await fetch(`${API_BASE}/api/backup`, { headers, credentials: 'include' });
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `homestack-backup-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+    a.click();
+    URL.revokeObjectURL(url);
+    status.textContent = 'Backup downloaded.';
+  } catch (err) {
+    status.textContent = `Backup failed: ${err.message}`;
+  }
+}
+
+async function restoreBackup() {
+  const fileInput = document.getElementById('restoreFile');
+  const status = document.getElementById('backupStatus');
+  if (!fileInput.files.length) { status.textContent = 'Select a .tar.gz file first.'; return; }
+  if (!confirm('Restore this backup? All current data will be overwritten.')) return;
+  status.textContent = 'Uploading…';
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  try {
+    const headers = {};
+    if (state.authConfig.mode === 'local' && state.token) headers.Authorization = `Bearer ${state.token}`;
+    const res = await fetch(`${API_BASE}/api/restore`, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+    toast(data.message, 'success');
+    status.textContent = data.message;
+    fileInput.value = '';
+  } catch (err) {
+    status.textContent = `Restore failed: ${err.message}`;
+    toast(`Restore failed: ${err.message}`, 'error');
+  }
+}
+
+async function editStack(stackName) {
+  try {
+    const stack = await api(`/api/stacks/${stackName}`);
+    state.editingStack = stackName;
+    els.deployTitle.textContent = `Edit stack: ${stackName}`;
+    els.deployBtn.classList.add('hidden');
+    els.saveEditBtn.classList.remove('hidden');
+    els.templateSelect.value = stack.template_id;
+    els.stackName.value = stack.stack_name;
+    els.installPath.value = stack.install_path;
+    renderDynamicFields(stack);
+    switchView('deploy');
+    els.statusBox.textContent = `Loaded ${stackName} for editing.`;
+  } catch (err) {
+    els.statusBox.textContent = `Could not load stack: ${err.message}`;
+  }
+}
+
+function resetDeployForm() {
+  state.editingStack = null;
+  els.deployTitle.textContent = 'Deploy a stack';
+  els.deployBtn.classList.remove('hidden');
+  els.saveEditBtn.classList.add('hidden');
+  els.stackName.value = '';
+  els.installPath.value = '';
+  renderTemplates();
+  renderDynamicFields();
+  els.statusBox.textContent = 'Ready to deploy a new stack.';
+}
+
+async function stackAction(stackName, action) {
+  try {
+    const data = await api(`/api/stacks/${stackName}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+    const msg = data.message || `Stack ${action} completed.`;
+    toast(msg, 'success');
+    els.statusBox.textContent = msg;
+    const logBox = document.getElementById(`logs-${stackName}`);
+    if (logBox) logBox.textContent = JSON.stringify(data, null, 2);
+    await refreshStacks();
+  } catch (err) {
+    toast(`Action failed: ${err.message}`, 'error');
+    els.statusBox.textContent = `Action failed: ${err.message}`;
+    const logBox = document.getElementById(`logs-${stackName}`);
+    if (logBox) logBox.textContent = `Action failed: ${err.message}`;
+  }
+}
+
+async function viewLogs(stackName) {
+  try {
+    const data = await api(`/api/stacks/${stackName}/logs`);
+    const logBox = document.getElementById(`logs-${stackName}`);
+    if (logBox) logBox.textContent = data.logs;
+  } catch (err) {
+    const logBox = document.getElementById(`logs-${stackName}`);
+    if (logBox) logBox.textContent = `Log fetch failed: ${err.message}`;
+  }
+}
+
+async function deleteStack(stackName) {
+  if (!confirm(`Delete stack "${stackName}"? This will stop its containers.`)) return;
+  const deleteData = confirm('Also delete data directories from disk? This cannot be undone.');
+  try {
+    await api(`/api/stacks/${stackName}?delete_data=${deleteData}`, { method: 'DELETE' });
+    els.statusBox.textContent = `Stack "${stackName}" deleted.`;
+    emitPluginEvent('stackDeleted', { stack_name: stackName });
+    await refreshStacks();
+  } catch (err) {
+    els.statusBox.textContent = `Delete failed: ${err.message}`;
+  }
+}
+
+async function pullAndRedeployStack(stackName) {
+  toast(`Pulling latest images for ${stackName}…`, 'info');
+  els.statusBox.textContent = `Pulling latest images for ${stackName}...`;
+  try {
+    const data = await api(`/api/stacks/${stackName}/pull`, { method: 'POST' });
+    toast(data.message || 'Stack updated.', 'success');
+    els.statusBox.textContent = JSON.stringify(data, null, 2);
+    const logBox = document.getElementById(`logs-${stackName}`);
+    if (logBox) logBox.textContent = JSON.stringify(data, null, 2);
+    await refreshStacks();
+  } catch (err) {
+    toast(`Update failed: ${err.message}`, 'error');
+    els.statusBox.textContent = `Update failed: ${err.message}`;
+  }
+}
+
+async function checkDiskUsage(stackName) {
+  const el = document.getElementById(`disk-${stackName}`);
+  if (el) el.textContent = 'Checking…';
+  try {
+    const data = await api(`/api/stacks/${stackName}/diskusage`);
+    if (el) el.textContent = data.disk_usage || 'N/A';
+  } catch (err) {
+    if (el) el.textContent = 'Error';
+  }
+}
+
+async function importContainer(containerName) {
+  if (!confirm(`Import "${containerName}" as a HomeStack-managed stack?\n\nThis generates a docker-compose.yml from the running container so you can manage it here.`)) return;
+  try {
+    await api(`/api/containers/${encodeURIComponent(containerName)}/import`, { method: 'POST' });
+    toast(`Imported "${containerName}" as a stack.`, 'success');
+    els.statusBox.textContent = `Imported "${containerName}" as a stack.`;
+    emitPluginEvent('containerImported', { container_name: containerName });
+    await refreshStacks();
+    renderSystemStatus();
+    switchView('stacks');
+  } catch (err) {
+    toast(`Import failed: ${err.message}`, 'error');
+    els.statusBox.textContent = `Import failed: ${err.message}`;
+  }
+}
+
+function renderPlugins() {
+  const list = document.getElementById('pluginsList');
+  if (!list) return;
+  if (!state.plugins.length) {
+    list.innerHTML = '<p class="hint">No plugins installed.</p>';
+    return;
+  }
+  list.innerHTML = state.plugins.map(p => `
+    <div class="plugin-card">
+      <div class="plugin-card-info">
+        <strong>${escapeHtml(p.name || p.id)}</strong>
+        <span class="hint">v${escapeHtml(p.version || '?')} ${p.author ? `by ${escapeHtml(p.author)}` : ''}</span>
+        ${p.description ? `<p class="plugin-desc">${escapeHtml(p.description)}</p>` : ''}
+      </div>
+      <div class="plugin-card-actions">
+        <span class="badge ${p.enabled ? 'badge-success' : 'badge-muted'}">${p.enabled ? 'Enabled' : 'Disabled'}</span>
+        <button class="btn-sm btn-ghost" data-plugin-action="toggle" data-plugin-id="${escapeHtml(p.id)}">${p.enabled ? 'Disable' : 'Enable'}</button>
+        <button class="btn-sm btn-danger" data-plugin-action="uninstall" data-plugin-id="${escapeHtml(p.id)}">Uninstall</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function pluginInstallGit() {
+  const url = document.getElementById('pluginGitUrl').value.trim();
+  const status = document.getElementById('pluginStatus');
+  if (!url) { status.textContent = 'Enter a git URL first.'; return; }
+  status.textContent = 'Cloning plugin...';
+  try {
+    const data = await api('/api/plugins/install/git', {
+      method: 'POST',
+      body: JSON.stringify({ git_url: url }),
+    });
+    toast(`Plugin "${data.name || data.id}" installed.`, 'success');
+    status.textContent = `Installed: ${data.name || data.id} v${data.version}`;
+    document.getElementById('pluginGitUrl').value = '';
+    await loadPlugins();
+  } catch (err) {
+    toast(`Install failed: ${err.message}`, 'error');
+    status.textContent = `Install failed: ${err.message}`;
+  }
+}
+
+async function pluginInstallZip() {
+  const fileInput = document.getElementById('pluginZipFile');
+  const status = document.getElementById('pluginStatus');
+  if (!fileInput.files.length) { status.textContent = 'Select a ZIP file first.'; return; }
+  const file = fileInput.files[0];
+  status.textContent = 'Uploading plugin...';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const headers = {};
+    if (state.authConfig.mode === 'local' && state.token) headers.Authorization = `Bearer ${state.token}`;
+    const res = await fetch(`${API_BASE}/api/plugins/install/zip`, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+    toast(`Plugin "${data.name || data.id}" installed.`, 'success');
+    status.textContent = `Installed: ${data.name || data.id} v${data.version}`;
+    fileInput.value = '';
+    await loadPlugins();
+  } catch (err) {
+    toast(`Upload failed: ${err.message}`, 'error');
+    status.textContent = `Upload failed: ${err.message}`;
+  }
+}
+
+async function login() {
+  try {
+    const data = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username: els.loginUsername.value.trim(), password: els.loginPassword.value }),
+    });
+    setAuth(data.token, data.user);
+    els.authStatus.textContent = 'Login successful.';
+    await refreshAll();
+  } catch (err) {
+    els.authStatus.textContent = `Login failed: ${err.message}`;
+  }
+}
+
+async function register() {
+  try {
+    const data = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username: els.registerUsername.value.trim(), password: els.registerPassword.value }),
+    });
+    setAuth(data.token, data.user);
+    els.authStatus.textContent = 'Account created.';
+    await refreshAll();
+  } catch (err) {
+    els.authStatus.textContent = `Registration failed: ${err.message}`;
+  }
+}
+
+function templateExample() {
+  document.getElementById('builderId').value = 'nextcloud-basic';
+  document.getElementById('builderName').value = 'Nextcloud Basic';
+  document.getElementById('builderDescription').value = 'Example custom template for a Linux friendly Nextcloud deployment.';
+  document.getElementById('builderSubdir').value = 'cloud/nextcloud';
+  document.getElementById('builderPlaceholders').value = 'NC_CONFIG_PATH\nNC_DATA_PATH';
+  document.getElementById('builderCompose').value = `services:
+  app:
+    image: nextcloud:stable
+    container_name: {{STACK_NAME}}
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    volumes:
+      - {{NC_CONFIG_PATH}}:/var/www/html
+      - {{NC_DATA_PATH}}:/var/www/html/data`;
+}
+
+async function saveTemplate() {
+  const required_placeholders = document.getElementById('builderPlaceholders').value
+    .split('\n')
+    .map(v => v.trim())
+    .filter(Boolean);
+  try {
+    const data = await api('/api/templates', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: document.getElementById('builderId').value.trim(),
+        name: document.getElementById('builderName').value.trim(),
+        description: document.getElementById('builderDescription').value.trim(),
+        default_install_subdir: document.getElementById('builderSubdir').value.trim(),
+        required_placeholders,
+        compose_template_text: document.getElementById('builderCompose').value,
+      }),
+    });
+    els.builderStatus.textContent = JSON.stringify(data, null, 2);
+    await refreshAll();
+  } catch (err) {
+    els.builderStatus.textContent = `Save failed: ${err.message}`;
+  }
+}
+
+function switchView(name) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  document.querySelectorAll('[id^="view-"]').forEach(section => section.classList.add('hidden'));
+  document.getElementById(`view-${name}`).classList.remove('hidden');
+}
+
+function wireNavigation() {
+  document.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      switchView(btn.dataset.view);
+      if (btn.dataset.view === 'settings') { loadNotifSettings(); loadUsers(); }
+      if (btn.dataset.view === 'images') loadImages();
+    });
+  });
+  document.querySelectorAll('.auth-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.auth-view').forEach(v => v.classList.add('hidden'));
+      document.getElementById(`auth-${btn.dataset.authView}`).classList.remove('hidden');
+    });
+  });
+}
+
+els.templateSelect.addEventListener('change', () => {
+  els.stackName.value = '';
+  els.installPath.value = '';
+  applyTemplateDefaults();
+});
+els.installPath.addEventListener('input', () => renderDynamicFields());
+els.stackName.addEventListener('input', () => {
+  const name = els.stackName.value.trim().toLowerCase();
+  const warn = document.getElementById('duplicateWarning');
+  if (!warn) return;
+  const match = state.containers.find(c => {
+    const cname = (c.Names || c.Name || '').replace(/^\//, '').toLowerCase();
+    return cname === name || cname.startsWith(name + '-') || cname.endsWith('-' + name);
+  });
+  if (match && name) {
+    const cname = (match.Names || match.Name || '').replace(/^\//, '');
+    warn.textContent = `Warning: a container named "${cname}" already exists (${match.State || match.Status || 'unknown state'}). Deploying may conflict.`;
+    warn.classList.remove('hidden');
+  } else {
+    warn.classList.add('hidden');
+  }
+});
+document.getElementById('refreshAll').addEventListener('click', refreshAll);
+document.getElementById('refreshStacksBtn').addEventListener('click', refreshStacks);
+document.getElementById('deployBtn').addEventListener('click', deployStack);
+document.getElementById('saveEditBtn').addEventListener('click', saveEdit);
+document.getElementById('newStackBtn').addEventListener('click', resetDeployForm);
+document.getElementById('logoutBtn').addEventListener('click', clearAuth);
+document.getElementById('loginBtn').addEventListener('click', login);
+document.getElementById('registerBtn').addEventListener('click', register);
+document.getElementById('builderSave').addEventListener('click', saveTemplate);
+document.getElementById('builderGenerateExample').addEventListener('click', templateExample);
+document.getElementById('pluginInstallGitBtn').addEventListener('click', pluginInstallGit);
+document.getElementById('pluginInstallZipBtn').addEventListener('click', pluginInstallZip);
+
+document.getElementById('notifSaveBtn').addEventListener('click', saveNotifSettings);
+document.getElementById('notifTestBtn').addEventListener('click', testNotification);
+document.getElementById('backupDownloadBtn').addEventListener('click', downloadBackup);
+document.getElementById('restoreBtn').addEventListener('click', restoreBackup);
+document.getElementById('refreshImagesBtn').addEventListener('click', loadImages);
+document.getElementById('createUserBtn').addEventListener('click', createUser);
+
+document.getElementById('usersList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-user-action]');
+  if (!btn) return;
+  const action = btn.dataset.userAction;
+  const username = btn.dataset.username;
+  if (action === 'delete') {
+    if (!confirm(`Remove user "${username}"?`)) return;
+    try {
+      await api(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+      toast(`User "${username}" removed.`, 'success');
+      await loadUsers();
+    } catch (err) { toast(`Failed: ${err.message}`, 'error'); }
+  }
+});
+
+document.getElementById('usersList').addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-user-action="setrole"]');
+  if (!sel) return;
+  try {
+    await api(`/api/users/${encodeURIComponent(sel.dataset.username)}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role: sel.value }),
+    });
+    toast(`Role updated.`, 'success');
+  } catch (err) { toast(`Failed: ${err.message}`, 'error'); }
+});
+
+document.getElementById('imagesList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-img-action="delete"]');
+  if (!btn) return;
+  await deleteImage(btn.dataset.imgRef);
+});
+
+const hamburgerBtn = document.getElementById('hamburgerBtn');
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
+function closeSidebar() {
+  sidebar.classList.remove('open');
+  sidebarOverlay.classList.remove('open');
+}
+hamburgerBtn.addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+  sidebarOverlay.classList.toggle('open');
+});
+sidebarOverlay.addEventListener('click', closeSidebar);
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', closeSidebar);
+});
+
+document.getElementById('pluginsList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-plugin-action]');
+  if (!btn) return;
+  const action = btn.dataset.pluginAction;
+  const pluginId = btn.dataset.pluginId;
+  const status = document.getElementById('pluginStatus');
+  if (action === 'toggle') {
+    try {
+      const data = await api(`/api/plugins/${encodeURIComponent(pluginId)}/toggle`, { method: 'POST' });
+      toast(`Plugin ${data.enabled ? 'enabled' : 'disabled'}.`, 'info');
+      await loadPlugins();
+    } catch (err) {
+      toast(`Toggle failed: ${err.message}`, 'error');
+    }
+  } else if (action === 'uninstall') {
+    if (!confirm(`Uninstall plugin "${pluginId}"?`)) return;
+    try {
+      await api(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' });
+      toast(`Plugin "${pluginId}" uninstalled.`, 'success');
+      status.textContent = `Plugin "${pluginId}" uninstalled. Reload the page to remove its UI elements.`;
+      await loadPlugins();
+    } catch (err) {
+      toast(`Uninstall failed: ${err.message}`, 'error');
+    }
+  }
+});
+els.ssoRetryBtn.addEventListener('click', async () => {
+  try {
+    const me = await api('/api/auth/me');
+    state.user = me.user;
+    renderUser();
+    els.authOverlay.classList.add('hidden');
+    await refreshAll();
+  } catch (err) {
+    els.authStatus.textContent = `SSO check failed: ${err.message}`;
+  }
+});
+
+els.systemStatus.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action="import"]');
+  if (!btn) return;
+  await importContainer(btn.dataset.containerName);
+});
+
+document.getElementById('stackSearch').addEventListener('input', (e) => {
+  renderStacks(e.target.value);
+});
+
+document.getElementById('containerSearch').addEventListener('input', () => {
+  renderSystemStatus();
+  renderSparklines();
+});
+
+setInterval(async () => {
+  if (!state.user) return;
+  try {
+    const [containers, stacks] = await Promise.all([
+      api('/api/containers').catch(() => state.containers),
+      api('/api/stacks').catch(() => state.stacks),
+    ]);
+    state.containers = containers;
+    state.stacks = stacks;
+    renderSystemStatus();
+    renderSparklines();
+    renderStacks(document.getElementById('stackSearch')?.value || '');
+  } catch { /* silent */ }
+}, 30000);
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('hs-theme', next);
+  document.getElementById('themeToggle').textContent = next === 'dark' ? '🌙' : '☀️';
+});
+
+initTheme();
+wireNavigation();
+renderUser();
+renderAuthMode();
+
+(async function init() {
+  try {
+    const config = await api('/api/auth/config');
+    state.authConfig = config;
+    renderAuthMode();
+    renderUser();
+  } catch {
+    state.authConfig = { mode: 'local', login_url: '/', local_auth_enabled: true };
+  }
+
+  if (state.authConfig.mode === 'authelia_proxy') {
+    try {
+      const me = await api('/api/auth/me');
+      state.user = me.user;
+      localStorage.setItem('homeStackUser', JSON.stringify(me.user));
+      renderUser();
+      els.authOverlay.classList.add('hidden');
+      await refreshAll();
+    } catch {
+      els.authOverlay.classList.remove('hidden');
+      els.authStatus.textContent = 'This instance is using Authelia SSO. Sign in via the reverse proxy and then press Retry.';
+    }
+    return;
+  }
+
+  if (!state.token) {
+    els.authOverlay.classList.remove('hidden');
+    return;
+  }
+  try {
+    const me = await api('/api/auth/me');
+    state.user = me.user;
+    localStorage.setItem('homeStackUser', JSON.stringify(me.user));
+    renderUser();
+    els.authOverlay.classList.add('hidden');
+    await refreshAll();
+  } catch {
+    clearAuth();
+  }
+})();

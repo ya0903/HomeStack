@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HomeStack</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Auth overlay -->
+<div id="authOverlay" class="auth-overlay">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <h1>HomeStack</h1>
+      <p>Deploy and manage Docker Compose stacks</p>
+    </div>
+
+    <div id="localAuthBlock">
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-auth-view="login">Sign in</button>
+        <button class="auth-tab" data-auth-view="register">Create account</button>
+      </div>
+      <div id="auth-login" class="auth-view">
+        <label>Username
+          <input id="loginUsername" type="text" autocomplete="username" placeholder="your-username" />
+        </label>
+        <label>Password
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" />
+        </label>
+        <button id="loginBtn" class="primary">Sign in</button>
+      </div>
+      <div id="auth-register" class="auth-view hidden">
+        <label>Username
+          <input id="registerUsername" type="text" autocomplete="username" placeholder="choose-a-username" />
+        </label>
+        <label>Password
+          <input id="registerPassword" type="password" autocomplete="new-password" placeholder="min. 8 characters" />
+        </label>
+        <button id="registerBtn" class="primary">Create account</button>
+      </div>
+    </div>
+
+    <div id="ssoAuthBlock" class="hidden">
+      <h3 style="margin-bottom:0.4rem">Authelia SSO</h3>
+      <p class="subtitle">Authentication is handled via Authelia through a reverse proxy.</p>
+      <div class="button-row" style="margin-top:1rem">
+        <a id="ssoLoginLink" class="button-link primary" href="/">Open login</a>
+        <button id="ssoRetryBtn">Retry</button>
+      </div>
+    </div>
+
+    <pre id="authStatus">First account becomes admin.</pre>
+  </div>
+</div>
+
+<!-- App -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<div class="app-shell">
+
+  <button class="hamburger" id="hamburgerBtn" title="Open menu">☰</button>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <h1>HomeStack</h1>
+      <p>Docker Compose manager</p>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="nav-btn active" data-view="deploy">
+        <span class="nav-icon">🚀</span> Deploy
+      </button>
+      <button class="nav-btn" data-view="stacks">
+        <span class="nav-icon">📦</span> Stacks
+      </button>
+      <button class="nav-btn" data-view="templates">
+        <span class="nav-icon">🧩</span> Templates
+      </button>
+      <button class="nav-btn" data-view="system">
+        <span class="nav-icon">⚙️</span> System
+      </button>
+      <button class="nav-btn" data-view="images">
+        <span class="nav-icon">🖼</span> Images
+      </button>
+      <button class="nav-btn" data-view="plugins">
+        <span class="nav-icon">🔌</span> Plugins
+      </button>
+      <button class="nav-btn" data-view="settings">
+        <span class="nav-icon">🛠️</span> Settings
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-box">
+        <div class="user-box-row">
+          <div class="user-avatar" id="userAvatar">?</div>
+          <div class="user-info">
+            <strong id="currentUser">Not signed in</strong>
+            <span id="currentRole">Guest</span>
+          </div>
+        </div>
+      </div>
+      <div class="sidebar-actions">
+        <button id="themeToggle" class="theme-toggle" title="Toggle theme">🌙</button>
+        <button id="logoutBtn">Log out</button>
+      </div>
+      <div id="authModeBadge" class="hint" style="text-align:center">Auth mode: local</div>
+    </div>
+  </aside>
+
+  <main class="content">
+
+    <!-- Deploy -->
+    <section class="panel" id="view-deploy">
+      <div class="panel-header">
+        <h2 id="deployTitle">🚀 Deploy a stack</h2>
+        <div class="button-row">
+          <button id="newStackBtn">New stack</button>
+          <button id="refreshAll">Refresh</button>
+        </div>
+      </div>
+
+      <label>Template
+        <select id="templateSelect"></select>
+      </label>
+
+      <div class="form-grid">
+        <label>Stack name
+          <input id="stackName" type="text" placeholder="jellyfin-main" />
+        </label>
+        <label>Install path
+          <input id="installPath" type="text" placeholder="/opt/homelab/jellyfin" />
+        </label>
+      </div>
+
+      <div id="customComposeField" class="hidden">
+        <label>Docker Compose YAML
+          <textarea id="customCompose" rows="14" spellcheck="false"
+            placeholder="services:&#10;  app:&#10;    image: example/app:latest&#10;    container_name: my-app&#10;    restart: unless-stopped&#10;    ports:&#10;      - &quot;8080:80&quot;"></textarea>
+        </label>
+        <div id="duplicateWarning" class="hidden" style="color:var(--danger);font-size:0.82rem;padding:0.25rem 0"></div>
+      </div>
+
+      <div id="dynamicFields" class="grid"></div>
+
+      <div class="subpanel" style="margin-top:0.5rem">
+        <div class="panel-header compact">
+          <h3>Named volume bindings</h3>
+          <span class="hint">Optional — bind a placeholder to an existing Docker volume</span>
+        </div>
+        <div id="volumeBindings" class="grid"></div>
+      </div>
+
+      <div class="button-row" style="margin-top:1rem">
+        <button id="deployBtn" class="primary">🚀 Deploy stack</button>
+        <button id="saveEditBtn" class="hidden primary">💾 Save changes</button>
+      </div>
+      <pre id="statusBox">Ready.</pre>
+    </section>
+
+    <!-- Stacks -->
+    <section class="panel hidden" id="view-stacks">
+      <div class="panel-header">
+        <h2>📦 Deployed stacks</h2>
+        <div class="button-row">
+          <input id="stackSearch" type="search" placeholder="Search stacks…"
+            style="padding:0.42em 0.75em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.84rem;outline:none;width:180px" />
+          <button id="refreshStacksBtn">Refresh</button>
+        </div>
+      </div>
+      <div id="categoryTabs" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.9rem"></div>
+      <div id="stacksList"></div>
+    </section>
+
+    <!-- Template builder -->
+    <section class="panel hidden" id="view-templates">
+      <div class="panel-header">
+        <h2>🧩 Template builder</h2>
+      </div>
+      <div class="form-grid" style="margin-bottom:0.75rem">
+        <label>Template ID
+          <input id="builderId" type="text" placeholder="nextcloud-custom" />
+        </label>
+        <label>Template name
+          <input id="builderName" type="text" placeholder="Nextcloud" />
+        </label>
+      </div>
+      <label>Description
+        <input id="builderDescription" type="text" placeholder="Describe what this stack deploys" />
+      </label>
+      <label>Default install subdirectory
+        <input id="builderSubdir" type="text" placeholder="cloud/nextcloud" />
+      </label>
+      <label>Placeholder keys — one per line
+        <textarea id="builderPlaceholders" rows="5" placeholder="APP_CONFIG_PATH&#10;APP_DATA_PATH"></textarea>
+      </label>
+      <label>Compose template
+        <textarea id="builderCompose" rows="16" spellcheck="false"
+          placeholder="services:&#10;  app:&#10;    image: example/app:latest&#10;    container_name: {{STACK_NAME}}&#10;    volumes:&#10;      - {{APP_CONFIG_PATH}}:/config"></textarea>
+      </label>
+      <div class="button-row">
+        <button id="builderGenerateExample">Insert example</button>
+        <button id="builderSave" class="primary">💾 Save template</button>
+      </div>
+      <pre id="builderStatus">Create reusable deployment templates.</pre>
+    </section>
+
+    <!-- System -->
+    <section class="panel hidden" id="view-system">
+      <div class="panel-header">
+        <h2>⚙️ System status</h2>
+        <input id="containerSearch" type="search" placeholder="Search containers…"
+          style="padding:0.42em 0.75em;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:0.84rem;outline:none;width:200px" />
+      </div>
+      <div id="systemStatus"></div>
+    </section>
+
+    <!-- Plugins -->
+    <section class="panel hidden" id="view-plugins">
+      <div class="panel-header">
+        <h2>🔌 Plugins</h2>
+      </div>
+
+      <div class="subpanel" style="margin-bottom:1.2rem">
+        <div class="panel-header compact">
+          <h3>Install from Git URL</h3>
+        </div>
+        <span style="font-size:0.82rem;color:var(--text-2);display:block;margin-bottom:0.4rem">Git repository URL</span>
+        <div style="display:flex;gap:0.5rem">
+          <input id="pluginGitUrl" type="text" placeholder="https://github.com/user/my-homestack-plugin" style="flex:1" />
+          <button id="pluginInstallGitBtn" class="primary">Install</button>
+        </div>
+      </div>
+
+      <div class="subpanel" style="margin-bottom:1.2rem">
+        <div class="panel-header compact">
+          <h3>Install from ZIP</h3>
+        </div>
+        <span style="font-size:0.82rem;color:var(--text-2);display:block;margin-bottom:0.4rem">Plugin ZIP file</span>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <input id="pluginZipFile" type="file" accept=".zip" style="flex:1" />
+          <button id="pluginInstallZipBtn" class="primary">Upload</button>
+        </div>
+      </div>
+
+      <h3 style="margin-bottom:0.75rem">Installed plugins</h3>
+      <div id="pluginsList"><p class="hint">No plugins installed.</p></div>
+
+      <pre id="pluginStatus" style="margin-top:1rem">Install a plugin to extend HomeStack.</pre>
+    </section>
+
+    <!-- Settings -->
+    <section class="panel hidden" id="view-settings">
+      <div class="panel-header">
+        <h2>🛠️ Settings</h2>
+      </div>
+
+      <!-- User management (admin only) -->
+      <div class="subpanel" style="margin-bottom:1.2rem" id="userMgmtPanel">
+        <div class="panel-header compact"><h3>User management</h3></div>
+        <div id="usersList"><p class="hint">Loading…</p></div>
+        <div class="button-row" style="margin-top:0.75rem">
+          <input id="newUserUsername" type="text" placeholder="username" style="width:130px" />
+          <input id="newUserPassword" type="password" placeholder="password (min 8)" style="width:150px" />
+          <select id="newUserRole">
+            <option value="user">Viewer</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button id="createUserBtn" class="primary btn-sm">Add user</button>
+        </div>
+        <pre id="userMgmtStatus" style="margin-top:0.6rem">Admin only.</pre>
+      </div>
+
+      <!-- Notifications -->
+      <div class="subpanel" style="margin-bottom:1.2rem">
+        <div class="panel-header compact"><h3>Notifications</h3></div>
+        <div class="form-grid" style="margin-bottom:0.75rem">
+          <label>Discord webhook URL
+            <input id="notifDiscord" type="text" placeholder="https://discord.com/api/webhooks/…" />
+          </label>
+          <label>ntfy URL
+            <input id="notifNtfy" type="text" placeholder="https://ntfy.sh/your-topic" />
+          </label>
+          <label style="grid-column: 1 / -1">Generic webhook URL
+            <input id="notifWebhook" type="text" placeholder="https://your-server/hook" />
+          </label>
+        </div>
+        <div style="margin-bottom:0.75rem">
+          <label style="display:flex;flex-direction:row;align-items:center;gap:0.5rem;cursor:pointer;margin-bottom:0">
+            <input id="notifEnabled" type="checkbox" />
+            <span>Enable notifications</span>
+          </label>
+        </div>
+        <div style="font-size:0.82rem;color:var(--text-2);margin-bottom:0.6rem">Notify on events:</div>
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.9rem">
+          <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer"><input type="checkbox" class="notif-event" value="stack_deployed" /> Stack deployed</label>
+          <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer"><input type="checkbox" class="notif-event" value="stack_deleted" /> Stack deleted</label>
+          <label style="display:flex;align-items:center;gap:0.35rem;cursor:pointer"><input type="checkbox" class="notif-event" value="health_fail" /> Health check failed</label>
+        </div>
+        <div class="button-row">
+          <button id="notifSaveBtn" class="primary">Save</button>
+          <button id="notifTestBtn">Send test</button>
+        </div>
+        <pre id="notifStatus" style="margin-top:0.75rem">Load settings to configure.</pre>
+      </div>
+
+      <!-- Backup / Restore -->
+      <div class="subpanel">
+        <div class="panel-header compact"><h3>Backup & Restore</h3></div>
+        <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:0.9rem">
+          Backup exports all stacks, templates, plugins, and settings as a <code>.tar.gz</code>. Restore replaces all data — restart HomeStack after restoring.
+        </p>
+        <div class="button-row" style="align-items:flex-end">
+          <button id="backupDownloadBtn" class="primary">Download backup</button>
+          <label style="flex:1">
+            <span style="font-size:0.82rem;color:var(--text-2);display:block;margin-bottom:0.4rem">Restore from backup</span>
+            <div style="display:flex;gap:0.5rem">
+              <input id="restoreFile" type="file" accept=".tar.gz,.tgz" style="flex:1" />
+              <button id="restoreBtn">Restore</button>
+            </div>
+          </label>
+        </div>
+        <pre id="backupStatus" style="margin-top:0.75rem">Ready.</pre>
+      </div>
+    </section>
+
+    <!-- Images -->
+    <section class="panel hidden" id="view-images">
+      <div class="panel-header">
+        <h2>🖼 Images</h2>
+        <button id="refreshImagesBtn">Refresh</button>
+      </div>
+      <div id="imagesList"><p class="hint">Loading images…</p></div>
+    </section>
+
+    <!-- Plugin-injected panels rendered here -->
+    <div id="pluginPanels"></div>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

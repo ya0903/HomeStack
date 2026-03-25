@@ -8,15 +8,22 @@ from fastapi.responses import FileResponse, StreamingResponse
 from .auth import (
     authenticate_user,
     create_token,
+    delete_user,
     get_auth_config,
     get_auth_mode,
     get_current_user,
+    get_current_user_stream,
+    list_users,
     register_user,
+    require_admin,
+    set_user_role,
 )
 from .docker_ops import (
+    check_stack_updates,
     compose_available,
     create_backup_archive,
     delete_health_config,
+    delete_image,
     delete_stack,
     deploy_raw_stack,
     deploy_stack,
@@ -24,6 +31,7 @@ from .docker_ops import (
     get_container_resources,
     get_stack,
     get_stack_category,
+    get_stack_compose_dir,
     get_stack_disk_usage,
     get_stack_logs,
     get_stack_runtime_status,
@@ -31,6 +39,7 @@ from .docker_ops import (
     list_all_containers,
     list_categories,
     list_deployed_stacks,
+    list_images,
     list_named_volumes,
     pull_and_redeploy,
     restore_backup_archive,
@@ -53,7 +62,9 @@ from .models import (
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
+    UserRoleRequest,
 )
+from .resource_history import get_history as get_resource_history
 from .templates import create_custom_template, get_templates
 from .notifications import load_notification_settings, save_notification_settings, send_notification
 from .scheduler import delete_schedule, get_schedule, list_schedules, set_schedule, start_scheduler
@@ -147,7 +158,7 @@ def containers(user=Depends(get_current_user)) -> list:
 
 
 @app.post('/api/deploy/raw')
-def deploy_raw(request: RawDeploymentRequest, user=Depends(get_current_user)) -> dict:
+def deploy_raw(request: RawDeploymentRequest, user=Depends(require_admin)) -> dict:
     try:
         response = deploy_raw_stack(request)
         return response.model_dump()
@@ -181,7 +192,7 @@ def stack_logs(stack_name: str, user=Depends(get_current_user)) -> dict:
 
 
 @app.post('/api/deploy')
-def create_stack(request: StackDeploymentRequest, user=Depends(get_current_user)) -> dict:
+def create_stack(request: StackDeploymentRequest, user=Depends(require_admin)) -> dict:
     try:
         response = deploy_stack(request)
         send_notification('stack_deployed', 'Stack deployed', f'{request.stack_name} deployed successfully')
@@ -193,7 +204,7 @@ def create_stack(request: StackDeploymentRequest, user=Depends(get_current_user)
 
 
 @app.put('/api/stacks/{stack_name}')
-def edit_stack(stack_name: str, request: StackDeploymentRequest, user=Depends(get_current_user)) -> dict:
+def edit_stack(stack_name: str, request: StackDeploymentRequest, user=Depends(require_admin)) -> dict:
     try:
         response = update_stack(stack_name, request)
         return response.model_dump()
@@ -204,7 +215,7 @@ def edit_stack(stack_name: str, request: StackDeploymentRequest, user=Depends(ge
 
 
 @app.post('/api/stacks/{stack_name}/action')
-def stack_action(stack_name: str, request: StackActionRequest, user=Depends(get_current_user)) -> dict:
+def stack_action(stack_name: str, request: StackActionRequest, user=Depends(require_admin)) -> dict:
     try:
         return run_stack_action(stack_name, request.action)
     except FileNotFoundError as exc:
@@ -214,7 +225,7 @@ def stack_action(stack_name: str, request: StackActionRequest, user=Depends(get_
 
 
 @app.post('/api/stacks/{stack_name}/pull')
-def pull_stack(stack_name: str, user=Depends(get_current_user)) -> dict:
+def pull_stack(stack_name: str, user=Depends(require_admin)) -> dict:
     try:
         return pull_and_redeploy(stack_name)
     except FileNotFoundError as exc:
@@ -243,7 +254,7 @@ def import_container_endpoint(container_name: str, user=Depends(get_current_user
 def remove_stack(
     stack_name: str,
     delete_data: bool = False,
-    user=Depends(get_current_user),
+    user=Depends(require_admin),
 ) -> dict:
     try:
         result = delete_stack(stack_name, delete_data)
@@ -263,7 +274,7 @@ def get_plugins(user=Depends(get_current_user)) -> list:
 
 
 @app.post('/api/plugins/install/git')
-def plugin_install_git(request: PluginGitInstallRequest, user=Depends(get_current_user)) -> dict:
+def plugin_install_git(request: PluginGitInstallRequest, user=Depends(require_admin)) -> dict:
     try:
         return install_plugin_from_git(request.git_url)
     except (ValueError, RuntimeError) as exc:
@@ -271,7 +282,7 @@ def plugin_install_git(request: PluginGitInstallRequest, user=Depends(get_curren
 
 
 @app.post('/api/plugins/install/zip')
-async def plugin_install_zip(file: UploadFile = File(...), user=Depends(get_current_user)) -> dict:
+async def plugin_install_zip(file: UploadFile = File(...), user=Depends(require_admin)) -> dict:
     try:
         content = await file.read()
         return install_plugin_from_zip(content)
@@ -280,7 +291,7 @@ async def plugin_install_zip(file: UploadFile = File(...), user=Depends(get_curr
 
 
 @app.post('/api/plugins/{plugin_id}/toggle')
-def plugin_toggle(plugin_id: str, user=Depends(get_current_user)) -> dict:
+def plugin_toggle(plugin_id: str, user=Depends(require_admin)) -> dict:
     try:
         return toggle_plugin(plugin_id)
     except FileNotFoundError as exc:
@@ -288,7 +299,7 @@ def plugin_toggle(plugin_id: str, user=Depends(get_current_user)) -> dict:
 
 
 @app.delete('/api/plugins/{plugin_id}')
-def plugin_uninstall(plugin_id: str, user=Depends(get_current_user)) -> dict:
+def plugin_uninstall(plugin_id: str, user=Depends(require_admin)) -> dict:
     try:
         uninstall_plugin(plugin_id)
         return {'ok': True}
@@ -319,7 +330,7 @@ def categories_map(user=Depends(get_current_user)) -> dict:
 
 
 @app.put('/api/stacks/{stack_name}/category')
-def set_category(stack_name: str, request: StackCategoryRequest, user=Depends(get_current_user)) -> dict:
+def set_category(stack_name: str, request: StackCategoryRequest, user=Depends(require_admin)) -> dict:
     set_stack_category(stack_name, request.category)
     return {'ok': True, 'stack_name': stack_name, 'category': request.category}
 
@@ -332,13 +343,13 @@ def stack_health(stack_name: str, user=Depends(get_current_user)) -> dict:
 
 
 @app.put('/api/stacks/{stack_name}/health')
-def set_stack_health(stack_name: str, request: StackHealthConfigRequest, user=Depends(get_current_user)) -> dict:
+def set_stack_health(stack_name: str, request: StackHealthConfigRequest, user=Depends(require_admin)) -> dict:
     save_health_config(stack_name, request.url, request.expected_status)
     return {'ok': True, 'stack_name': stack_name, 'url': request.url}
 
 
 @app.delete('/api/stacks/{stack_name}/health')
-def remove_stack_health(stack_name: str, user=Depends(get_current_user)) -> dict:
+def remove_stack_health(stack_name: str, user=Depends(require_admin)) -> dict:
     delete_health_config(stack_name)
     return {'ok': True}
 
@@ -358,7 +369,7 @@ def schedules(user=Depends(get_current_user)) -> dict:
 
 
 @app.put('/api/stacks/{stack_name}/schedule')
-def set_stack_schedule(stack_name: str, request: StackScheduleRequest, user=Depends(get_current_user)) -> dict:
+def set_stack_schedule(stack_name: str, request: StackScheduleRequest, user=Depends(require_admin)) -> dict:
     try:
         result = set_schedule(stack_name, request.cron, request.enabled)
         return {'ok': True, 'stack_name': stack_name, **result}
@@ -367,7 +378,7 @@ def set_stack_schedule(stack_name: str, request: StackScheduleRequest, user=Depe
 
 
 @app.delete('/api/stacks/{stack_name}/schedule')
-def remove_stack_schedule(stack_name: str, user=Depends(get_current_user)) -> dict:
+def remove_stack_schedule(stack_name: str, user=Depends(require_admin)) -> dict:
     delete_schedule(stack_name)
     return {'ok': True}
 
@@ -386,7 +397,7 @@ def get_notifications(user=Depends(get_current_user)) -> dict:
 
 
 @app.put('/api/settings/notifications')
-def update_notifications(request: NotificationSettingsRequest, user=Depends(get_current_user)) -> dict:
+def update_notifications(request: NotificationSettingsRequest, user=Depends(require_admin)) -> dict:
     save_notification_settings(request.model_dump())
     return {'ok': True}
 
@@ -400,7 +411,7 @@ def test_notification(user=Depends(get_current_user)) -> dict:
 # ── Backup / Restore ──────────────────────────────────────────────────────────
 
 @app.get('/api/backup')
-def backup(user=Depends(get_current_user)):
+def backup(user=Depends(require_admin)):
     data = create_backup_archive()
     return StreamingResponse(
         io.BytesIO(data),
@@ -410,10 +421,108 @@ def backup(user=Depends(get_current_user)):
 
 
 @app.post('/api/restore')
-async def restore(file: UploadFile = File(...), user=Depends(get_current_user)) -> dict:
+async def restore(file: UploadFile = File(...), user=Depends(require_admin)) -> dict:
     try:
         content = await file.read()
         restore_backup_archive(content)
         return {'ok': True, 'message': 'Backup restored successfully. Restart HomeStack to apply.'}
     except (ValueError, Exception) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ── Image management ───────────────────────────────────────────────────────────
+
+@app.get('/api/images')
+def images(user=Depends(get_current_user)) -> list:
+    return list_images()
+
+
+@app.delete('/api/images')
+def remove_image(ref: str, user=Depends(require_admin)) -> dict:
+    try:
+        return delete_image(ref)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ── Update checks ──────────────────────────────────────────────────────────────
+
+@app.get('/api/stacks/{stack_name}/update-check')
+def stack_update_check(stack_name: str, user=Depends(get_current_user)) -> dict:
+    try:
+        return check_stack_updates(stack_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ── Resource history ───────────────────────────────────────────────────────────
+
+@app.get('/api/resources/history')
+def resource_history(user=Depends(get_current_user)) -> list:
+    return get_resource_history()
+
+
+# ── Live log streaming (SSE) ───────────────────────────────────────────────────
+
+@app.get('/api/stacks/{stack_name}/logs/stream')
+async def stream_stack_logs(stack_name: str, user=Depends(get_current_user_stream)):
+    import asyncio
+    stack_dir = get_stack_compose_dir(stack_name)
+    compose_file = stack_dir / 'docker-compose.yml'
+    if not compose_file.exists():
+        raise HTTPException(status_code=404, detail=f'Stack {stack_name!r} not found')
+
+    async def generate():
+        proc = await asyncio.create_subprocess_exec(
+            'docker', 'compose', '-f', str(compose_file), 'logs', '-f', '--tail=100', '--no-color',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=25.0)
+                except asyncio.TimeoutError:
+                    yield 'data: [heartbeat]\n\n'
+                    continue
+                if not line:
+                    break
+                text = line.decode('utf-8', errors='replace').rstrip()
+                yield f'data: {text}\n\n'
+        finally:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+
+    return StreamingResponse(
+        generate(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
+
+# ── User management ────────────────────────────────────────────────────────────
+
+@app.get('/api/users')
+def get_users(user=Depends(require_admin)) -> list:
+    return list_users()
+
+
+@app.put('/api/users/{username}/role')
+def set_role(username: str, request: UserRoleRequest, user=Depends(require_admin)) -> dict:
+    try:
+        set_user_role(username, request.role)
+        return {'ok': True, 'username': username, 'role': request.role}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete('/api/users/{username}')
+def remove_user(username: str, user=Depends(require_admin)) -> dict:
+    try:
+        delete_user(username, user.username)
+        return {'ok': True}
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

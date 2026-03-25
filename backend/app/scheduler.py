@@ -13,6 +13,15 @@ _scheduler = BackgroundScheduler(timezone='UTC')
 _started = False
 
 
+def _record_resources() -> None:
+    try:
+        from .docker_ops import get_container_resources
+        from .resource_history import record_snapshot
+        record_snapshot(get_container_resources())
+    except Exception:
+        pass
+
+
 def start_scheduler() -> None:
     global _started
     if _started:
@@ -20,6 +29,14 @@ def start_scheduler() -> None:
     _scheduler.start()
     _started = True
     _load_persisted()
+    _scheduler.add_job(
+        _record_resources,
+        'interval',
+        seconds=30,
+        id='resource_snapshot',
+        replace_existing=True,
+    )
+    _record_resources()  # capture first snapshot immediately
 
 
 def _load_persisted() -> None:

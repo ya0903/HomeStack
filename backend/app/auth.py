@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Query, Request
 
 from .models import UserResponse
 
@@ -151,3 +151,53 @@ def get_current_user(request: Request, authorization: str | None = Header(defaul
         raise HTTPException(status_code=401, detail='Missing bearer token')
     token = authorization.split(' ', 1)[1].strip()
     return decode_token(token)
+
+
+def get_current_user_stream(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    token: str | None = Query(default=None),
+) -> UserResponse:
+    """Like get_current_user but also accepts ?token= query param for EventSource streams."""
+    if get_auth_mode() == 'authelia_proxy':
+        return _authelia_user_from_request(request)
+    tok = None
+    if authorization and authorization.startswith('Bearer '):
+        tok = authorization.split(' ', 1)[1].strip()
+    elif token:
+        tok = token
+    if not tok:
+        raise HTTPException(status_code=401, detail='Missing bearer token')
+    return decode_token(tok)
+
+
+def require_admin(user: UserResponse = Depends(get_current_user)) -> UserResponse:
+    if user.role != 'admin':
+        raise HTTPException(status_code=403, detail='Admin access required')
+    return user
+
+
+def list_users() -> List[Dict[str, str]]:
+    return [{'username': u['username'], 'role': u['role']} for u in _load_users()]
+
+
+def set_user_role(username: str, role: str) -> None:
+    if role not in {'admin', 'user'}:
+        raise ValueError('Role must be admin or user')
+    users = _load_users()
+    for u in users:
+        if u['username'] == username:
+            u['role'] = role
+            _save_users(users)
+            return
+    raise ValueError(f'User "{username}" not found')
+
+
+def delete_user(username: str, requesting_user: str) -> None:
+    if username == requesting_user:
+        raise ValueError('Cannot delete your own account')
+    users = _load_users()
+    new_users = [u for u in users if u['username'] != username]
+    if len(new_users) == len(users):
+        raise ValueError(f'User "{username}" not found')
+    _save_users(new_users)

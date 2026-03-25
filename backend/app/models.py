@@ -201,3 +201,15 @@ class PluginGitInstallRequest(BaseModel):
         if not value.startswith(('https://', 'http://', 'git@')):
             raise ValueError('git_url must start with https://, http://, or git@')
         return value
+
+
+class UserRoleRequest(BaseModel):
+    role: str
+
+    @field_validator('role')
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {'admin', 'user'}:
+            raise ValueError('Role must be admin or user')
+        return value
