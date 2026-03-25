@@ -99,6 +99,14 @@
           <input id="installPath" type="text" placeholder="/opt/homelab/jellyfin-main" />
         </label>
 
+        <div id="customComposeField" class="hidden">
+          <label>
+            Docker Compose YAML
+            <textarea id="customCompose" rows="16" spellcheck="false" placeholder="services:&#10;  app:&#10;    image: example/app:latest&#10;    container_name: my-app&#10;    restart: unless-stopped&#10;    ports:&#10;      - &quot;8080:80&quot;"></textarea>
+          </label>
+          <div id="duplicateWarning" class="hidden" style="color:#c0392b;padding:0.5em 0;font-size:0.9em;"></div>
+        </div>
+
         <div id="dynamicFields" class="grid"></div>
 
         <section class="subpanel">
@@ -119,7 +127,10 @@
       <section class="panel hidden" id="view-stacks">
         <div class="panel-header">
           <h2>Deployed stacks</h2>
-          <button id="refreshStacksBtn">Refresh stacks</button>
+          <div class="button-row">
+            <input id="stackSearch" type="search" placeholder="Search stacks..." style="padding:0.4em 0.6em;border-radius:4px;border:1px solid #444;background:#1a1f2e;color:inherit;font-size:0.9em" />
+            <button id="refreshStacksBtn">Refresh stacks</button>
+          </div>
         </div>
         <div id="stacksList"></div>
       </section>
@@ -169,6 +180,7 @@
       <section class="panel hidden" id="view-system">
         <div class="panel-header">
           <h2>System status</h2>
+          <input id="containerSearch" type="search" placeholder="Search containers..." style="padding:0.4em 0.6em;border-radius:4px;border:1px solid #444;background:#1a1f2e;color:inherit;font-size:0.9em" />
         </div>
         <div id="systemStatus"></div>
       </section>
