@@ -14,7 +14,7 @@ Built for homelabbers who want a clean, modern interface to deploy, monitor, upd
 [![Docker](https://img.shields.io/badge/Docker-required-2496ED?logo=docker&logoColor=white)](https://docker.com)
 [![Nginx](https://img.shields.io/badge/Nginx-Alpine-009639?logo=nginx&logoColor=white)](https://nginx.org)
 
-[Quick Install](#quick-install) · [Features](#features) · [Screenshots](#screenshots) · [Plugins](#plugin-system) · [Configuration](#configuration) · [Adding Templates](#adding-templates)
+[Quick Install](#quick-install) · [Features](#features) · [Screenshots](#screenshots) · [Marketplace](#marketplace) · [Plugins](#plugin-system) · [Configuration](#configuration)
 
 </div>
 
@@ -26,11 +26,11 @@ Built for homelabbers who want a clean, modern interface to deploy, monitor, upd
 
 | Deploy | Stacks |
 |--------|--------|
-| <img src="screenshots/deploy.png" width="420" /> | <img src="screenshots/stacks.png" width="420" /> |
+| <img src="docs/screenshots/deploy.png" width="420" /> | <img src="docs/screenshots/stacks.png" width="420" /> |
 
 | System Status | Plugins |
 |--------------|-----------|
-| <img src="screenshots/system.png" width="420" /> | <img src="screenshots/plugins.png" width="420" /> |
+| <img src="docs/screenshots/system.png" width="420" /> | <img src="docs/screenshots/plugins.png" width="420" /> |
 
 </div>
 
@@ -38,41 +38,59 @@ Built for homelabbers who want a clean, modern interface to deploy, monitor, upd
 
 ## Features
 
-### Core
+### Deploy & Manage
 
 | | Feature | Description |
 |---|---|---|
-| 🚀 | **Deploy stacks** | From built-in templates or paste your own `docker-compose.yml` |
-| 📦 | **Built-in templates** | Jellyfin, Nextcloud, qBittorrent, Radarr, Sonarr, Bazarr, Prowlarr, Immich, Vaultwarden, Komga, Arr-stack |
-| 🧩 | **Custom template builder** | Create reusable templates with placeholder variables |
-| 📥 | **Import existing containers** | Auto-generate a compose file from any running container and bring it under HomeStack management |
+| 🚀 | **One-click deploy** | Deploy from the marketplace, a custom template, or paste raw `docker-compose.yml` |
+| 🛒 | **App marketplace** | 47+ pre-built apps — Jellyfin, Nextcloud, Immich, Sonarr, Authentik, WireGuard and more |
+| 🧩 | **Custom template builder** | Create reusable templates with `{{PLACEHOLDER}}` variables |
+| 📥 | **Import existing containers** | Auto-generate a compose file from any running container |
 | ♻️ | **One-click update** | Pull latest images and redeploy with a single button |
-| 🔌 | **Plugin system** | Extend the UI and add new features with community-built plugins |
+| 🔍 | **Update checker** | Detect when a newer image digest is available on Docker Hub |
+| 📋 | **Copy compose** | Copy the deployed `docker-compose.yml` to clipboard from any stack card |
 
-### Visibility
+### Visibility & Monitoring
 
 | | Feature | Description |
 |---|---|---|
 | 🟢 | **Live container status** | Every container on the host with state, image, and ports |
-| 🔢 | **Port display** | Exposed ports shown on each stack card at a glance |
-| 💾 | **Disk usage** | Check how much space each stack's data directory is using |
-| 🔁 | **Auto-refresh** | Container and stack status refreshes every 30 seconds |
-| 🔍 | **Search and filter** | Across stacks and containers |
+| 📡 | **Live log streaming** | Stream logs from any container in real time directly in the UI |
+| 📈 | **Resource graphs** | Rolling CPU and memory sparklines per container, sampled every 30 seconds |
+| 💾 | **Disk usage dashboard** | Docker image, container, volume, and build cache usage at a glance |
+| 🏥 | **Health checks** | Configure a URL per stack — HomeStack polls it and shows pass/fail status |
+| 🔁 | **Auto-refresh** | Container and stack status refreshes automatically |
+| 🔍 | **Search and filter** | Search stacks and filter by category tab |
 
-### Safety
+### Organisation
 
 | | Feature | Description |
 |---|---|---|
-| ⚠️ | **Duplicate detection** | Warns if a stack name or port conflicts with a running container |
+| 📌 | **Pin stacks** | Pin frequently used stacks to the top of the list |
+| 🏷️ | **Categories** | Tag each stack with a category and filter by tab |
+| ⏰ | **Scheduled restarts** | Set a cron schedule per stack for automatic restarts |
+| 🌐 | **Network manager** | View, create, inspect, and delete Docker networks from the UI |
+| 🖼️ | **Image manager** | List all Docker images and delete unused ones |
+
+### Safety & Access
+
+| | Feature | Description |
+|---|---|---|
+| ⚠️ | **Duplicate detection** | Warns on stack name or port conflicts before deploying |
+| ✅ | **Confirm dialogs** | Stop and restart actions require confirmation |
 | 🔐 | **Local authentication** | JWT-based login — first account becomes admin |
-| 🔑 | **Authelia SSO** | Optional, via reverse proxy header |
+| 👥 | **Multi-user roles** | Admin and viewer roles — viewers can browse but cannot make changes |
+| 🔑 | **Authelia / SSO** | Optional SSO via reverse proxy header |
+| 🔔 | **Notifications** | Send alerts to Discord, ntfy, or a generic webhook on deploy, delete, and health failures |
+| 💼 | **Backup & restore** | Export and import all deployed stack configs as a zip archive |
 
 ### UI
 
 | | Feature | Description |
 |---|---|---|
 | 🌙 | **Dark and light theme** | Persists across sessions |
-| 📱 | **Responsive layout** | Works on any screen size |
+| 📱 | **Responsive layout** | Slide-in sidebar and mobile-friendly layout on small screens |
+| 🔌 | **Plugin system** | Extend the UI and add new features with community-built plugins |
 
 ---
 
@@ -87,7 +105,7 @@ The script will ask for:
 - Frontend port (default: `7080`)
 - Backend port (default: `7079`)
 
-> **Note:** First account you create becomes admin.
+> **Note:** The first account you register becomes admin. Subsequent accounts are viewers by default — promote them in Settings → User Management.
 
 ---
 
@@ -119,9 +137,21 @@ git pull
 docker compose -f homestack.yml restart backend
 ```
 
-> A full rebuild (`up -d --build`) is only needed if `backend/Dockerfile` or `requirements.txt` changed. For all other updates, a restart is enough.
+> A full rebuild (`up -d --build`) is only needed if `backend/Dockerfile` or `requirements.txt` changed. For all other updates a restart is sufficient.
 
 Or re-run the install script — it detects an existing install and updates in place.
+
+---
+
+## Marketplace
+
+The marketplace ships with 47+ ready-to-deploy apps across categories including Media, Downloads, Networking, Security, Productivity, Smart Home, Gaming, and more.
+
+**Included apps include:** Jellyfin · Plex · Immich · Navidrome · Audiobookshelf · Calibre-Web · Komga · Kavita · Kaizoku · Sonarr · Radarr · Prowlarr · qBittorrent · Lazy Librarian · Nextcloud · Seafile · Paperless-ngx · Mealie · Trilium Notes · FreshRSS · Monica · Firefly III · Vaultwarden · Authelia · Authentik · WireGuard Easy · Pi-hole · AdGuard Home · Nginx Proxy Manager · Uptime Kuma · Netdata · Grafana · Gitea · Homer · Homepage · Dashy · Home Assistant · Portainer CE · File Browser · Syncthing · Stirling PDF · Jellyseerr · RomM · Pterodactyl Panel · Matrix Synapse · Kiwix · Whoami
+
+### Community uploads
+
+Any admin can submit their own app to the marketplace directly from the UI — fill in a name, category, icon, description, and paste a `docker-compose.yml`. Submitted templates are stored on the server and available to all users.
 
 ---
 
@@ -180,7 +210,7 @@ export function init(PluginAPI) {
 }
 ```
 
-### Full PluginAPI reference
+### PluginAPI reference
 
 | Method | Description |
 |---|---|
@@ -221,45 +251,40 @@ HomeStack/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── app/
-│       ├── main.py            # API routes
-│       ├── auth.py            # Authentication
+│       ├── main.py            # All API routes
+│       ├── auth.py            # JWT auth, user management, SSO
 │       ├── docker_ops.py      # Docker/Compose operations
-│       ├── models.py          # Pydantic models
-│       ├── plugin_ops.py      # Plugin management
-│       └── templates.py       # Template management
+│       ├── models.py          # Pydantic request/response models
+│       ├── plugin_ops.py      # Plugin install/enable/disable
+│       ├── scheduler.py       # APScheduler — cron restarts, resource snapshots
+│       ├── resource_history.py# Rolling in-memory resource history (60 samples)
+│       ├── marketplace_ops.py # Custom marketplace template storage
+│       └── templates.py       # Built-in template management
 ├── frontend/
 │   ├── index.html
 │   ├── app.js
 │   ├── styles.css
 │   └── nginx.conf
-└── templates/                 # Built-in stack templates
-    ├── jellyfin/
-    │   ├── template.json
-    │   └── docker-compose.yml.tpl
-    └── ...
+├── templates/                 # Built-in parameterised stack templates
+│   ├── jellyfin/
+│   │   ├── template.json
+│   │   └── docker-compose.yml.tpl
+│   └── ...
+└── data/                      # Runtime data — gitignored, back this up
+    ├── users.json
+    ├── stacks/
+    ├── plugins/
+    └── marketplace/
 ```
-
-> Runtime data (deployed stacks, user database, custom templates, plugins) is stored in `data/` — this directory is gitignored. **Back it up.**
 
 ---
 
-## Adding Templates
+## Custom Template Builder
 
-Each template lives in `templates/<name>/` and needs two files:
+The Template Builder (under the Templates panel) lets you create parameterised templates stored on the server and reused across multiple deployments.
 
-**`template.json`**
-```json
-{
-  "id": "my-app",
-  "name": "My App",
-  "description": "What this deploys",
-  "default_install_subdir": "apps/my-app",
-  "required_placeholders": ["APP_DATA_PATH"],
-  "source": "builtin"
-}
-```
+Each template uses `{{PLACEHOLDER}}` syntax:
 
-**`docker-compose.yml.tpl`** — standard Compose YAML using `{{PLACEHOLDER}}` syntax:
 ```yaml
 services:
   my-app:
@@ -270,9 +295,7 @@ services:
       - {{APP_DATA_PATH}}:/data
 ```
 
-`STACK_NAME` and `INSTALL_PATH` are always available automatically.
-
-You can also create templates directly from the **Template builder** tab in the UI.
+`STACK_NAME` and `INSTALL_PATH` are always injected automatically. Any other placeholders prompt the user for a value at deploy time.
 
 ---
 
@@ -280,7 +303,7 @@ You can also create templates directly from the **Template builder** tab in the 
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.12 · FastAPI · Uvicorn |
+| Backend | Python 3.12 · FastAPI · Uvicorn · APScheduler |
 | Frontend | Vanilla JS · HTML · CSS (no frameworks) |
 | Auth | JWT (python-jose) · bcrypt |
 | Templates | Jinja2 |
