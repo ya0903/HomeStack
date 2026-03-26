@@ -22,17 +22,85 @@ Built for homelabbers who want a clean, modern interface to deploy, monitor, upd
 
 ## Screenshots
 
-<div align="center">
+<details>
+<summary><strong>🚀 Deploy</strong></summary>
+<br>
 
-| Deploy | Stacks |
-|--------|--------|
-| <img src="screenshots/deploy.png" width="420" /> | <img src="screenshots/stacks.png" width="420" /> |
+| Dark | Light |
+|------|-------|
+| <img src="docs/screenshots/dark/deploy.png" width="420" /> | <img src="docs/screenshots/light/deploy.png" width="420" /> |
 
-| System Status | Plugins |
-|--------------|-----------|
-| <img src="screenshots/system.png" width="420" /> | <img src="screenshots/plugins.png" width="420" /> |
+</details>
 
-</div>
+<details>
+<summary><strong>📦 Stacks</strong></summary>
+<br>
+
+| Dark | Light |
+|------|-------|
+| <img src="docs/screenshots/dark/stacks.png" width="420" /> | <img src="docs/screenshots/light/stacks.png" width="420" /> |
+
+</details>
+
+<details>
+<summary><strong>🛒 Templates & Marketplace</strong></summary>
+<br>
+
+| Dark | Light |
+|------|-------|
+| <img src="docs/screenshots/dark/templates.png" width="420" /> | <img src="docs/screenshots/light/templates.png" width="420" /> |
+
+</details>
+
+<details>
+<summary><strong>🖥️ System</strong></summary>
+<br>
+
+| Dark | Light |
+|------|-------|
+| <img src="docs/screenshots/dark/system.png" width="420" /> | <img src="docs/screenshots/light/system.png" width="420" /> |
+
+</details>
+
+<details>
+<summary><strong>🌐 Networks</strong></summary>
+<br>
+
+| Dark | Light |
+|------|-------|
+| <img src="docs/screenshots/dark/networks.png" width="420" /> | <img src="docs/screenshots/light/networks.png" width="420" /> |
+
+</details>
+
+<details>
+<summary><strong>🖼️ Images</strong></summary>
+<br>
+
+| Dark | Light |
+|------|-------|
+| <img src="docs/screenshots/dark/images.png" width="420" /> | <img src="docs/screenshots/light/images.png" width="420" /> |
+
+</details>
+
+<details>
+<summary><strong>🔌 Plugins</strong></summary>
+<br>
+
+| Dark | Light |
+|------|-------|
+| <img src="docs/screenshots/dark/plugins.png" width="420" /> | <img src="docs/screenshots/light/plugins.png" width="420" /> |
+
+</details>
+
+<details>
+<summary><strong>⚙️ Settings</strong></summary>
+<br>
+
+| Dark | Light |
+|------|-------|
+| <img src="docs/screenshots/dark/settings.png" width="420" /> | <img src="docs/screenshots/light/settings.png" width="420" /> |
+
+</details>
 
 ---
 
